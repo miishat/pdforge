@@ -63,3 +63,52 @@ describe("batch", () => {
     expect(needsPasswords([{ kind: "protect", requireOpen: true }])).toEqual({ owner: true, open: true });
   });
 });
+
+describe("assistant services", () => {
+  const settings = (provider: "openai" | "deepseek" | "local", extra: object = {}) => ({
+    enabled: true, provider, keys: { openai: "sk-1", deepseek: "ds-1" }, models: { openai: "m1" }, localUrl: "http://localhost:11434/v1", ...extra,
+  });
+  const streamOf = (lines: string[]) =>
+    new Response(new ReadableStream({ start(c) { for (const l of lines) c.enqueue(new TextEncoder().encode(l)); c.close(); } }), { status: 200 });
+
+  it("streams OpenAI-compatible chat completions, even when chunks split lines", async () => {
+    const { runAssistant } = await import("../../src/ui/ai/assistant");
+    const calls: { url: string; init: RequestInit }[] = [];
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      const a = `data: ${JSON.stringify({ choices: [{ delta: { content: "Hel" } }] })}\n\n`;
+      const b = `data: ${JSON.stringify({ choices: [{ delta: { content: "lo" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`;
+      return streamOf([a.slice(0, 10), a.slice(10) + b]);
+    }) as typeof fetch;
+    const seen: string[] = [];
+    const out = await runAssistant({ settings: settings("openai"), task: { kind: "summary" }, name: "x.pdf", text: "[Page 1]\nhi", onText: (t) => seen.push(t), signal: new AbortController().signal });
+    expect(out).toBe("Hello");
+    expect(seen.at(-1)).toBe("Hello");
+    expect(calls[0].url).toBe("https://api.openai.com/v1/chat/completions");
+    expect((calls[0].init.headers as Record<string, string>).Authorization).toBe("Bearer sk-1");
+  });
+
+  it("asks for JSON the way each service supports, and uses DeepSeek's default model", async () => {
+    const { runAssistant } = await import("../../src/ui/ai/assistant");
+    const bodies: Record<string, unknown>[] = [];
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return streamOf([`data: ${JSON.stringify({ choices: [{ delta: { content: '{"suggestions":[]}' }, finish_reason: "stop" }] })}\n\n`]);
+    }) as typeof fetch;
+    const task = { kind: "fields" as const, fields: [] };
+    const run = (s: ReturnType<typeof settings>) => runAssistant({ settings: s, task, name: "f.pdf", text: "[Page 1]\nName: Ann", onText: () => {}, signal: new AbortController().signal });
+    await run(settings("openai"));
+    await run(settings("deepseek"));
+    expect((bodies[0].response_format as { type: string }).type).toBe("json_schema");
+    expect((bodies[1].response_format as { type: string }).type).toBe("json_object");
+    expect(bodies[1].model).toBe("deepseek-chat");
+  });
+
+  it("refuses non-local addresses for the local option, and explains HTTP errors", async () => {
+    const { runAssistant } = await import("../../src/ui/ai/assistant");
+    const opts = (s: ReturnType<typeof settings>) => ({ settings: s, task: { kind: "summary" as const }, name: "x", text: "t", onText: () => {}, signal: new AbortController().signal });
+    await expect(runAssistant(opts(settings("local", { localUrl: "https://example.com/v1", models: { local: "llama" } })))).rejects.toThrow(/on this computer/);
+    globalThis.fetch = (async () => new Response(JSON.stringify({ error: { message: "bad key" } }), { status: 401 })) as typeof fetch;
+    await expect(runAssistant(opts(settings("openai")))).rejects.toThrow(/didn't accept the API key/);
+  });
+});

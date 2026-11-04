@@ -144,46 +144,60 @@ test("batch: compress several files", async ({ page }) => {
 });
 
 test("the assistant is off by default and sends nothing without confirmation", async ({ page }) => {
-  const requests: string[] = [];
-  await page.route("https://api.anthropic.com/**", async (route) => {
-    requests.push(route.request().postData() ?? "");
-    const events = [
-      { type: "message_start", message: { id: "msg_1", type: "message", role: "assistant", model: "claude-opus-5-5", content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 0 } } },
-      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
-      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "A five-page sample about a fox " } },
-      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "[p. 1] and an invoice [p. 2]." } },
-      { type: "content_block_stop", index: 0 },
-      { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 12 } },
-      { type: "message_stop" },
-    ];
-    await route.fulfill({
-      status: 200,
-      headers: { "content-type": "text/event-stream", "access-control-allow-origin": "*" },
-      body: events.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join(""),
+  const sent: { url: string; body: string; auth: string | undefined }[] = [];
+  const sse = (chunks: string[]) =>
+    chunks.map((c) => `data: ${JSON.stringify({ choices: [{ delta: { content: c }, finish_reason: null }] })}\n\n`).join("") +
+    `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`;
+  for (const host of ["https://api.openai.com", "https://api.deepseek.com"]) {
+    await page.route(`${host}/**`, async (route) => {
+      const req = route.request();
+      const headers = { "access-control-allow-origin": "*" };
+      if (req.method() === "OPTIONS") return route.fulfill({ status: 204, headers: { ...headers, "access-control-allow-headers": "*" } });
+      if (req.url().endsWith("/models")) return route.fulfill({ status: 200, headers, contentType: "application/json", body: JSON.stringify({ data: [{ id: "model-b" }, { id: "model-a" }] }) });
+      sent.push({ url: req.url(), body: req.postData() ?? "", auth: req.headers()["authorization"] });
+      await route.fulfill({ status: 200, headers: { ...headers, "content-type": "text/event-stream" }, body: sse(["A five-page sample about a fox ", "[p. 1] and an invoice [p. 2]."]) });
     });
-  });
+  }
   await open(page, "sample.pdf");
   await palette(page, "assistant");
   const panel = page.getByRole("complementary", { name: "Assistant" });
   await expect(panel.getByRole("checkbox", { name: "Turn on the assistant" })).not.toBeChecked();
   await panel.getByRole("checkbox", { name: "Turn on the assistant" }).check();
-  await panel.getByLabel("Anthropic API key").fill("sk-ant-test");
+  await expect(panel.getByLabel("Service", { exact: true })).toHaveValue("openai");
+  await panel.getByLabel("ChatGPT (OpenAI) API key").fill("sk-test");
+  // The model list comes from the service.
+  await panel.getByLabel("Model", { exact: true }).selectOption("model-a");
   await panel.getByRole("button", { name: "Done" }).click();
   await panel.getByRole("button", { name: "Summarise" }).click();
   const confirm = panel.getByRole("alertdialog", { name: "Confirm sending" });
   await expect(confirm).toContainText("Send all 5 pages of sample.pdf");
-  await expect(confirm).toContainText("Anthropic (Claude, claude-opus-5-5)");
-  expect(requests).toHaveLength(0);
+  await expect(confirm).toContainText("ChatGPT (OpenAI), model model-a");
+  expect(sent).toHaveLength(0);
   await confirm.getByRole("button", { name: "Cancel" }).click();
-  expect(requests).toHaveLength(0);
+  expect(sent).toHaveLength(0);
   await panel.getByRole("button", { name: "Summarise" }).click();
   await panel.getByRole("button", { name: "Send" }).click();
   await expect(panel.getByText(/A five-page sample about a fox/)).toBeVisible();
-  expect(requests).toHaveLength(1);
-  const body = JSON.parse(requests[0]);
-  expect(body.model).toBe("claude-opus-5-5");
-  expect(body.messages[0].content).toContain("[Page 2]");
+  expect(sent).toHaveLength(1);
+  expect(sent[0].url).toBe("https://api.openai.com/v1/chat/completions");
+  expect(sent[0].auth).toBe("Bearer sk-test");
+  const body = JSON.parse(sent[0].body);
+  expect(body.model).toBe("model-a");
+  expect(body.messages[1].content).toContain("[Page 2]");
   // Citations go to the page.
   await panel.getByRole("button", { name: "p. 2" }).click();
   await expect(pageNumber(page)).toHaveValue("2");
+
+  // DeepSeek works the same way, with its own key and a default model.
+  await panel.getByRole("button", { name: "Assistant settings" }).click();
+  await panel.getByLabel("Service", { exact: true }).selectOption("deepseek");
+  await panel.getByLabel("DeepSeek API key").fill("ds-test");
+  await panel.getByRole("button", { name: "Done" }).click();
+  await panel.getByLabel("Question").fill("What is the invoice number?");
+  await panel.getByLabel("Question").press("Enter");
+  await expect(panel.getByRole("alertdialog", { name: "Confirm sending" })).toContainText("DeepSeek");
+  await panel.getByRole("button", { name: "Send" }).click();
+  await expect.poll(() => sent.length).toBe(2);
+  expect(sent[1].url).toBe("https://api.deepseek.com/chat/completions");
+  expect(sent[1].auth).toBe("Bearer ds-test");
 });

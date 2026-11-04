@@ -1,12 +1,12 @@
 import { Dismiss20Regular, Send20Regular, Settings20Regular, Sparkle20Regular } from "@fluentui/react-icons";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { engine } from "../../core/client";
 import type { WidgetInfo } from "../../core/forms";
 import type { DocInfo, EditResult } from "../../core/types";
 import { parsePageRange } from "../doc/pageRange";
 import {
-  destination, documentText, loadAssistant, MAX_CHARS, nextTurn, parseSuggestions, runAssistant, saveAssistant, withCitations,
-  type AssistantSettings, type FieldSuggestion, type Task, type Turn,
+  destination, documentText, listModels, loadAssistant, MAX_CHARS, modelOf, nextTurn, parseSuggestions, providerInfo, PROVIDERS, ready, runAssistant, saveAssistant, withCitations,
+  type AssistantSettings, type FieldSuggestion, type ProviderId, type Task, type Turn,
 } from "./assistant";
 
 interface Exchange {
@@ -32,7 +32,7 @@ export function AssistantPanel({ info, name, currentPage, onClose, onGoPage, run
   run: <T extends EditResult>(op: () => Promise<T>) => Promise<T | null>;
 }) {
   const [settings, setSettings] = useState<AssistantSettings>(loadAssistant);
-  const [editing, setEditing] = useState(!settings.enabled);
+  const [editing, setEditing] = useState(!settings.enabled || !ready(settings));
   const [scope, setScope] = useState<"all" | "current" | "range">("all");
   const [range, setRange] = useState("");
   const [question, setQuestion] = useState("");
@@ -130,34 +130,7 @@ export function AssistantPanel({ info, name, currentPage, onClose, onGoPage, run
             <input type="checkbox" checked={settings.enabled} onChange={(e) => update({ enabled: e.target.checked })} />
             <span>Turn on the assistant</span>
           </label>
-          {settings.enabled && (
-            <>
-              <div className="row-gap">
-                <label className="radio"><input type="radio" checked={settings.provider === "anthropic"} onChange={() => update({ provider: "anthropic" })} /> Claude (your API key)</label>
-                <label className="radio"><input type="radio" checked={settings.provider === "local"} onChange={() => update({ provider: "local" })} /> Local model</label>
-              </div>
-              {settings.provider === "anthropic" ? (
-                <label className="label-stack">
-                  <span className="label-text">Anthropic API key</span>
-                  <input className="field" type="password" autoComplete="off" spellCheck={false} placeholder="sk-ant-…" value={settings.apiKey} onChange={(e) => update({ apiKey: e.target.value.trim() })} />
-                  <span className="muted">Create one at console.anthropic.com. It's kept in PDForge's settings on this computer and sent only to Anthropic.</span>
-                </label>
-              ) : (
-                <>
-                  <label className="label-stack">
-                    <span className="label-text">Ollama address</span>
-                    <input className="field" value={settings.localUrl} onChange={(e) => update({ localUrl: e.target.value.trim() })} />
-                  </label>
-                  <label className="label-stack">
-                    <span className="label-text">Model</span>
-                    <input className="field" value={settings.localModel} onChange={(e) => update({ localModel: e.target.value.trim() })} />
-                    <span className="muted">Nothing leaves this computer. Install Ollama and a model first, e.g. <code>ollama pull llama3.1</code>.</span>
-                  </label>
-                </>
-              )}
-              <button className="button button--primary" disabled={settings.provider === "anthropic" ? !settings.apiKey : !settings.localModel} onClick={() => setEditing(false)}>Done</button>
-            </>
-          )}
+          {settings.enabled && <ProviderSettings settings={settings} update={update} onDone={() => setEditing(false)} />}
         </div>
       ) : (
         <>
@@ -249,5 +222,86 @@ export function AssistantPanel({ info, name, currentPage, onClose, onGoPage, run
         </>
       )}
     </aside>
+  );
+}
+
+function ProviderSettings({ settings, update, onDone }: { settings: AssistantSettings; update: (p: Partial<AssistantSettings>) => void; onDone: () => void }) {
+  const info = providerInfo(settings.provider);
+  const [models, setModels] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const key = settings.keys[settings.provider] ?? "";
+  const model = modelOf(settings);
+  const canList = settings.provider === "local" || !!key;
+  const modelId = useId();
+  const serviceId = useId();
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const list = await listModels(settings);
+      setModels(list);
+      if (!list.length) setError("The service listed no models.");
+    } catch (e) {
+      setModels([]);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+  // The list depends on the service and key; fetch it when both are there.
+  useEffect(() => {
+    setModels([]);
+    setError(null);
+    if (canList) void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.provider, key, settings.localUrl]);
+
+  return (
+    <>
+      <div className="label-stack">
+        <label className="label-text" htmlFor={serviceId}>Service</label>
+        <select id={serviceId} className="select" value={settings.provider} onChange={(e) => update({ provider: e.target.value as ProviderId })}>
+          {PROVIDERS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+        </select>
+      </div>
+      {settings.provider === "local" ? (
+        <label className="label-stack">
+          <span className="label-text">Address</span>
+          <input className="field" value={settings.localUrl} spellCheck={false} onChange={(e) => update({ localUrl: e.target.value.trim() })} />
+          <span className="muted">Ollama: http://localhost:11434/v1 · LM Studio: http://localhost:1234/v1. Nothing leaves this computer.</span>
+        </label>
+      ) : (
+        <label className="label-stack">
+          <span className="label-text">{info.label} API key</span>
+          <input
+            className="field"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={key}
+            onChange={(e) => update({ keys: { ...settings.keys, [settings.provider]: e.target.value.trim() } })}
+          />
+          <span className="muted">Create one at {info.keyUrl}. It's kept in PDForge's settings on this computer and sent only to {info.label}.</span>
+        </label>
+      )}
+      <div className="label-stack">
+        <label className="label-text" htmlFor={modelId}>Model</label>
+        <div className="row-gap">
+          {models.length ? (
+            <select id={modelId} className="select" style={{ flex: 1 }} value={models.includes(model) ? model : ""} onChange={(e) => update({ models: { ...settings.models, [settings.provider]: e.target.value } })}>
+              {!models.includes(model) && <option value="">Choose a model</option>}
+              {models.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          ) : (
+            <input id={modelId} className="field" style={{ flex: 1 }} placeholder={canList ? "Model name" : "Enter the key first"} spellCheck={false} value={model} onChange={(e) => update({ models: { ...settings.models, [settings.provider]: e.target.value.trim() } })} />
+          )}
+          <button className="button button--small" disabled={!canList || loading} onClick={() => void load()}>{loading ? "Loading…" : "Refresh"}</button>
+        </div>
+        {error && <span className="error-text" role="alert">{error}</span>}
+      </div>
+      <button className="button button--primary" disabled={!ready(settings)} onClick={onDone}>Done</button>
+    </>
   );
 }

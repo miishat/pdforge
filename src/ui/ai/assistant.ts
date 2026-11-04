@@ -1,40 +1,111 @@
 // The optional assistant. Off by default. It sends document text only after the person confirms
-// each request, to either Anthropic's API (with their own key) or a local model server they run
-// (Ollama's chat API). Nothing is sent in the background.
-import Anthropic from "@anthropic-ai/sdk";
-import { engine } from "../../core/client";
+// each request, to the AI service they chose with their own key (ChatGPT, DeepSeek, Gemini, Mistral,
+// Groq, OpenRouter) or to a model server on this computer (Ollama, LM Studio). All of them speak
+// the OpenAI-compatible chat API. Nothing is sent in the background.
 import type { WidgetInfo } from "../../core/forms";
+import { engine } from "../../core/client";
 import { load, save } from "../settings";
 
-export type Provider = "anthropic" | "local";
+export type ProviderId = "openai" | "deepseek" | "gemini" | "mistral" | "groq" | "openrouter" | "local";
+
+export interface ProviderInfo {
+  id: ProviderId;
+  label: string;
+  /** Base URL of the OpenAI-compatible API (local: editable). */
+  baseUrl: string;
+  /** Where to get a key; null when none is needed. */
+  keyUrl: string | null;
+  /** A model to start with when we know a stable name; otherwise the person picks from the list. */
+  defaultModel: string;
+  /** Supports response_format json_schema (otherwise json_object plus the schema in the prompt). */
+  jsonSchema: boolean;
+}
+
+export const PROVIDERS: ProviderInfo[] = [
+  { id: "openai", label: "ChatGPT (OpenAI)", baseUrl: "https://api.openai.com/v1", keyUrl: "platform.openai.com/api-keys", defaultModel: "", jsonSchema: true },
+  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com", keyUrl: "platform.deepseek.com/api_keys", defaultModel: "deepseek-chat", jsonSchema: false },
+  { id: "gemini", label: "Google Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", keyUrl: "aistudio.google.com/apikey", defaultModel: "", jsonSchema: false },
+  { id: "mistral", label: "Mistral", baseUrl: "https://api.mistral.ai/v1", keyUrl: "console.mistral.ai/api-keys", defaultModel: "", jsonSchema: false },
+  { id: "groq", label: "Groq", baseUrl: "https://api.groq.com/openai/v1", keyUrl: "console.groq.com/keys", defaultModel: "", jsonSchema: false },
+  { id: "openrouter", label: "OpenRouter (many models)", baseUrl: "https://openrouter.ai/api/v1", keyUrl: "openrouter.ai/keys", defaultModel: "", jsonSchema: false },
+  { id: "local", label: "On this computer (Ollama, LM Studio)", baseUrl: "http://localhost:11434/v1", keyUrl: null, defaultModel: "", jsonSchema: false },
+];
+
+export const providerInfo = (id: ProviderId) => PROVIDERS.find((p) => p.id === id) ?? PROVIDERS[0];
 
 export interface AssistantSettings {
   enabled: boolean;
-  provider: Provider;
-  /** Anthropic API key (stored in PDForge's settings on this computer). */
-  apiKey: string;
-  /** Local model server (Ollama), e.g. http://localhost:11434. */
+  provider: ProviderId;
+  /** API keys per provider (stored in PDForge's settings on this computer). */
+  keys: Partial<Record<ProviderId, string>>;
+  /** Chosen model per provider. */
+  models: Partial<Record<ProviderId, string>>;
+  /** Address of the local server (Ollama: http://localhost:11434/v1, LM Studio: http://localhost:1234/v1). */
   localUrl: string;
-  localModel: string;
 }
 
-const DEFAULTS: AssistantSettings = { enabled: false, provider: "anthropic", apiKey: "", localUrl: "http://localhost:11434", localModel: "llama3.1" };
-const KEY = "assistant";
-export const CLAUDE_MODEL = "claude-opus-5-5";
+const DEFAULTS: AssistantSettings = { enabled: false, provider: "openai", keys: {}, models: {}, localUrl: "http://localhost:11434/v1" };
+const KEY = "assistant.v2";
 
 /** Above this, the person picks a page range rather than sending everything (and nothing is cut silently). */
 export const MAX_CHARS = 600_000;
 
 export function loadAssistant(): AssistantSettings {
-  return { ...DEFAULTS, ...load<Partial<AssistantSettings>>(KEY, {}) };
+  // The earlier version kept an Anthropic key under "assistant"; it isn't used any more, so drop it.
+  if (load<unknown>("assistant", null) !== null) save("assistant", null);
+  const v = { ...DEFAULTS, ...load<Partial<AssistantSettings>>(KEY, {}) };
+  if (!PROVIDERS.some((p) => p.id === v.provider)) v.provider = "openai";
+  return v;
 }
 
 export function saveAssistant(s: AssistantSettings) {
   save(KEY, s);
 }
 
+export function baseUrl(s: AssistantSettings): string {
+  return (s.provider === "local" ? s.localUrl : providerInfo(s.provider).baseUrl).replace(/\/+$/, "");
+}
+
+export function modelOf(s: AssistantSettings): string {
+  return s.models[s.provider] || providerInfo(s.provider).defaultModel;
+}
+
+export function ready(s: AssistantSettings): boolean {
+  return !!modelOf(s) && (s.provider === "local" || !!s.keys[s.provider]);
+}
+
 export function destination(s: AssistantSettings): string {
-  return s.provider === "anthropic" ? `Anthropic (Claude, ${CLAUDE_MODEL})` : `your local model "${s.localModel}" at ${s.localUrl}`;
+  const p = providerInfo(s.provider);
+  return s.provider === "local" ? `the model "${modelOf(s)}" on this computer` : `${p.label}, model ${modelOf(s)}`;
+}
+
+/** The models the service offers to this key (OpenAI-compatible GET /models). */
+export async function listModels(s: AssistantSettings, signal?: AbortSignal): Promise<string[]> {
+  checkLocal(s);
+  let resp: Response;
+  try {
+    resp = await fetch(`${baseUrl(s)}/models`, { headers: authHeaders(s), signal });
+  } catch {
+    throw new Error(s.provider === "local" ? `Couldn't reach ${baseUrl(s)}. Is Ollama or LM Studio running?` : "Couldn't reach the service. Check your internet connection.");
+  }
+  if (resp.status === 401 || resp.status === 403) throw new Error("The service didn't accept the API key.");
+  if (!resp.ok) throw new Error(`The service returned an error (${resp.status}).`);
+  const body = (await resp.json()) as { data?: { id?: string }[] };
+  return (body.data ?? []).map((m) => (m.id ?? "").replace(/^models\//, "")).filter(Boolean).sort();
+}
+
+function authHeaders(s: AssistantSettings): Record<string, string> {
+  const key = s.keys[s.provider];
+  const h: Record<string, string> = {};
+  if (key) h.Authorization = `Bearer ${key}`;
+  if (s.provider === "openrouter") h["X-Title"] = "PDForge";
+  return h;
+}
+
+function checkLocal(s: AssistantSettings) {
+  if (s.provider === "local" && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/.*)?$/.test(s.localUrl.trim())) {
+    throw new Error("The local address must be on this computer, like http://localhost:11434/v1.");
+  }
 }
 
 /** The document's text with page markers, for the pages chosen. */
@@ -108,90 +179,87 @@ export interface RunOptions {
 
 /** Runs one request and returns the full answer (for fields: the suggestions as JSON text). */
 export async function runAssistant(o: RunOptions): Promise<string> {
+  const s = o.settings;
+  checkLocal(s);
+  if (!ready(s)) throw new Error("Finish setting up the assistant first (service, key and model).");
   const prompt = nextTurn(o.task, o.name, o.text, !!o.history?.length);
-  return o.settings.provider === "anthropic" ? runClaude(o, prompt) : runLocal(o, prompt);
-}
-
-async function runClaude(o: RunOptions, prompt: string): Promise<string> {
-  if (!o.settings.apiKey) throw new Error("Add your Anthropic API key in the assistant's settings first.");
-  // A desktop app talking to the API with the person's own key; the key never leaves this computer otherwise.
-  const client = new Anthropic({ apiKey: o.settings.apiKey, dangerouslyAllowBrowser: true });
-  const messages: Anthropic.Beta.BetaMessageParam[] = [...(o.history ?? []).map((m) => ({ role: m.role, content: m.content })), { role: "user", content: prompt }];
-  try {
-    const stream = client.beta.messages.stream(
-      {
-        model: CLAUDE_MODEL,
-        max_tokens: 16000,
-        system: SYSTEM,
-        messages,
-        output_config: o.task.kind === "fields" ? { effort: "medium", format: { type: "json_schema", schema: FIELDS_SCHEMA } } : { effort: "medium" },
-        // If a safety check declines a request, the API retries on a suitable fallback model.
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
-      },
-      { signal: o.signal },
-    );
-    stream.on("text", (_delta, snapshot) => o.onText(snapshot));
-    const message = await stream.finalMessage();
-    if (message.stop_reason === "refusal") throw new Error("Claude declined this request.");
-    const text = message.content.map((b) => (b.type === "text" ? b.text : "")).join("");
-    if (message.stop_reason === "max_tokens") return `${text}\n\n(The answer was cut off at the length limit.)`;
-    return text;
-  } catch (err) {
-    if (o.signal.aborted) throw new DOMException("Cancelled", "AbortError");
-    if (err instanceof Anthropic.AuthenticationError) throw new Error("Anthropic didn't accept the API key. Check it in the assistant's settings.");
-    if (err instanceof Anthropic.PermissionDeniedError) throw new Error("This API key isn't allowed to use that model.");
-    if (err instanceof Anthropic.RateLimitError) throw new Error("Too many requests right now. Wait a moment and try again.");
-    if (err instanceof Anthropic.BadRequestError) throw new Error(`Anthropic couldn't process the request: ${err.message}`);
-    if (err instanceof Anthropic.APIConnectionError) throw new Error("Couldn't reach Anthropic. Check your internet connection.");
-    if (err instanceof Anthropic.APIError) throw new Error(`Anthropic returned an error (${err.status}).`);
-    throw err;
+  const info = providerInfo(s.provider);
+  const body: Record<string, unknown> = {
+    model: modelOf(s),
+    stream: true,
+    messages: [{ role: "system", content: SYSTEM }, ...(o.history ?? []), { role: "user", content: o.task.kind === "fields" && !info.jsonSchema ? `${prompt}\n\nReply with JSON only, matching this schema: ${JSON.stringify(FIELDS_SCHEMA)}` : prompt }],
+  };
+  if (o.task.kind === "fields") {
+    body.response_format = info.jsonSchema ? { type: "json_schema", json_schema: { name: "field_suggestions", strict: true, schema: FIELDS_SCHEMA } } : { type: "json_object" };
   }
-}
-
-/** Ollama's /api/chat, streamed as newline-delimited JSON. */
-async function runLocal(o: RunOptions, prompt: string): Promise<string> {
-  const base = o.settings.localUrl.replace(/\/+$/, "");
-  if (!/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(base)) throw new Error("The local model address must be on this computer (http://localhost:port).");
-  const messages = [{ role: "system", content: SYSTEM }, ...(o.history ?? []), { role: "user", content: prompt }];
   let resp: Response;
   try {
-    resp = await fetch(`${base}/api/chat`, {
+    resp = await fetch(`${baseUrl(s)}/chat/completions`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: o.settings.localModel, messages, stream: true, ...(o.task.kind === "fields" ? { format: FIELDS_SCHEMA } : {}) }),
+      headers: { "Content-Type": "application/json", ...authHeaders(s) },
+      body: JSON.stringify(body),
       signal: o.signal,
     });
-  } catch (err) {
+  } catch {
     if (o.signal.aborted) throw new DOMException("Cancelled", "AbortError");
-    throw new Error(`Couldn't reach the local model at ${base}. Is Ollama running?`);
+    throw new Error(s.provider === "local" ? `Couldn't reach ${baseUrl(s)}. Is Ollama or LM Studio running?` : `Couldn't reach ${info.label}. Check your internet connection.`);
   }
-  if (!resp.ok || !resp.body) throw new Error(`The local model returned an error (${resp.status}). Is "${o.settings.localModel}" installed?`);
+  if (!resp.ok || !resp.body) throw new Error(await errorMessage(resp, info.label));
   const reader = resp.body.getReader();
   const dec = new TextDecoder();
   let buf = "";
   let text = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let nl: number;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (!line) continue;
-      try {
-        const chunk = JSON.parse(line) as { message?: { content?: string }; error?: string };
-        if (chunk.error) throw new Error(chunk.error);
-        text += chunk.message?.content ?? "";
-        o.onText(text);
-      } catch (e) {
-        if (e instanceof SyntaxError) continue;
-        throw e;
+  let finish: string | null = null;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        // Server-sent events: "data: {json}" lines, ending with "data: [DONE]".
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (data === "[DONE]") continue;
+        try {
+          const chunk = JSON.parse(data) as { choices?: { delta?: { content?: string | null }; finish_reason?: string | null }[]; error?: { message?: string } };
+          if (chunk.error) throw new Error(`${info.label}: ${chunk.error.message ?? "error"}`);
+          const c = chunk.choices?.[0];
+          if (c?.delta?.content) {
+            text += c.delta.content;
+            o.onText(text);
+          }
+          if (c?.finish_reason) finish = c.finish_reason;
+        } catch (e) {
+          if (e instanceof SyntaxError) continue;
+          throw e;
+        }
       }
     }
+  } catch (e) {
+    if (o.signal.aborted) throw new DOMException("Cancelled", "AbortError");
+    throw e;
   }
+  if (finish === "content_filter") throw new Error(`${info.label} declined this request.`);
+  if (finish === "length") return `${text}\n\n(The answer was cut off at the length limit.)`;
   return text;
+}
+
+async function errorMessage(resp: Response, label: string): Promise<string> {
+  let detail = "";
+  try {
+    const j = (await resp.json()) as { error?: { message?: string } | string };
+    detail = typeof j.error === "string" ? j.error : j.error?.message ?? "";
+  } catch {
+    // no JSON body
+  }
+  if (resp.status === 401 || resp.status === 403) return `${label} didn't accept the API key. Check it in the assistant's settings.`;
+  if (resp.status === 402) return `${label} says the account has no credit left.`;
+  if (resp.status === 404) return `${label} doesn't know that model. Pick another in the assistant's settings.`;
+  if (resp.status === 429) return `${label} is limiting requests right now (or the account's quota is used up). Try again later.`;
+  return `${label} returned an error (${resp.status})${detail ? `: ${detail}` : ""}.`;
 }
 
 export function parseSuggestions(json: string): FieldSuggestion[] {

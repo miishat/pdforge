@@ -150,9 +150,10 @@ close-window prompt (all are desktop-only paths; the browser test build download
 - ✅ Table extraction: finds tables from aligned rows and columns (wrapped cells and tight spacing handled), preview,
   export to an Excel workbook (one sheet per table, numbers as numbers, bold header) or CSV files
 - ✅ Optional assistant (off by default): summarise, ask questions with clickable page citations, follow-ups, and
-  suggest form values from the document (each with its source page, applied one by one). Claude via your own
-  Anthropic API key (Claude Opus 5.5, streamed) or a local model through Ollama. Every request shows the pages,
-  size and destination and waits for Send; nothing runs in the background
+  suggest form values from the document (each with its source page, applied one by one). Works with ChatGPT (OpenAI),
+  DeepSeek, Google Gemini, Mistral, Groq or OpenRouter using your own API key (one key per service, model picked from
+  the service's own list), or a model on this computer (Ollama, LM Studio). Every request shows the pages, size and
+  destination and waits for Send; nothing runs in the background
 - 🟡 Not yet: tagging untagged PDFs (needs the source application), editing reading order, comparing scanned
-  documents (recognise text first), structured outputs from local models depend on the model, the API key is stored
-  in the app's settings rather than Windows Credential Manager
+  documents (recognise text first), JSON form suggestions from some services and local models depend on the model,
+  API keys are stored in the app's settings rather than Windows Credential Manager

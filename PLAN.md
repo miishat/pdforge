@@ -110,9 +110,10 @@ The full brief is in [docs/PROMPT.md](docs/PROMPT.md); progress is tracked in [d
 - Tables: text pieces (split at gaps of about an em) form rows by vertical position; a run of multi-cell rows is a
   table when the word-level whitespace columns line up; single-piece rows that fit the columns, and wrapped cells,
   join it. XLSX is written with the same ZIP writer as DOCX.
-- The assistant uses the official Anthropic TypeScript SDK in the WebView (`dangerouslyAllowBrowser`, the person's
-  own key), streaming, structured outputs for form suggestions, and the server-side refusal fallback. Local models
-  use Ollama's chat API (localhost only). The CSP allows only those two destinations.
+- The assistant talks to any OpenAI-compatible chat API with `fetch` (ChatGPT, DeepSeek, Gemini, Mistral, Groq,
+  OpenRouter, or a local Ollama/LM Studio server): streamed server-sent events, `json_schema` output where the service
+  supports it (otherwise `json_object` with the schema in the prompt), models listed from `GET /models`. Keys are per
+  service. The CSP allows exactly those hosts plus localhost.
 
 ## Key risks and mitigations
 
