@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="1024" height="1024">
+  <!-- Paper page with a folded ember corner; readable on light and dark taskbars. -->
+  <path d="M64 20h94l58 58v150a12 12 0 0 1-12 12H64a12 12 0 0 1-12-12V32a12 12 0 0 1 12-12z" fill="#f6f2ea" stroke="#2a2621" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M158 20v46a12 12 0 0 0 12 12h46z" fill="#d0632f" stroke="#2a2621" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M88 126h92M88 158h92M88 190h56" stroke="#2a2621" stroke-width="14" stroke-linecap="round"/>
+</svg>
