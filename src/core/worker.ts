@@ -25,8 +25,8 @@ scope.onmessage = async (event: MessageEvent<Envelope>) => {
     }
     const fn = (engine as unknown as Record<string, (...a: unknown[]) => unknown>)[op];
     if (typeof fn !== "function" || op.startsWith("_")) throw new Error(`Unknown engine operation "${op}".`);
-    const value = fn.apply(engine, args);
-    const transfer = value instanceof Uint8Array && op === "renderImage" ? [value.buffer] : [];
+    const value = await fn.apply(engine, args);
+    const transfer = value instanceof Uint8Array ? [value.buffer] : [];
     reply({ id, ok: true, value }, transfer);
   } catch (err) {
     const code = err instanceof EngineError ? err.code : undefined;

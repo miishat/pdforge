@@ -1,6 +1,7 @@
 // Generates the PDF test corpus used by unit and end-to-end tests.
 // Run: node scripts/make-fixtures.mjs
 import * as mupdf from "mupdf";
+import forge from "node-forge";
 import { writeFileSync, mkdirSync } from "node:fs";
 
 const out = new URL("../tests/fixtures/", import.meta.url);
@@ -81,5 +82,78 @@ const rich = makeDoc([
   rich.setMetaData("info:Subject", "Phase 1 test document");
 }
 writeFileSync(new URL("features.pdf", out), rich.saveToBuffer("compress").asUint8Array());
+
+// Fillable form: text, number with currency total, date, checkbox, radio group, dropdown, list.
+{
+  const doc = new mupdf.PDFDocument();
+  const S = (x) => doc.newString(x);
+  const helv = doc.addObject({ Type: "Font", Subtype: "Type1", BaseFont: "Helvetica", Encoding: "WinAnsiEncoding" });
+  const zadb = doc.addObject({ Type: "Font", Subtype: "Type1", BaseFont: "ZapfDingbats" });
+  const labels = ["Name", "Quantity A", "Quantity B", "Total", "Date", "Subscribe", "Size", "Colour", "Delivery", "Notes"];
+  let content = "BT /Helv 18 Tf 72 740 Td (Order form) Tj ET\nBT /Helv 11 Tf 72 700 Td ";
+  labels.forEach((l, i) => (content += `${i ? "0 -40 Td " : ""}(${l}) Tj `));
+  content += "ET";
+  const pageObj = doc.addPage([0, 0, 612, 792], 0, doc.addObject({ Font: { Helv: helv } }), content);
+  doc.insertPage(0, pageObj);
+  const page = doc.findPage(0);
+  const fields = doc.newArray();
+  const annots = doc.newArray();
+  const row = (i, w = 200, h = 20) => [180, 692 - i * 40, 180 + w, 692 - i * 40 + h];
+  const DA = S("/Helv 11 Tf 0 g");
+  const add = (o) => {
+    const ref = doc.addObject({ Type: "Annot", Subtype: "Widget", F: 4, P: page, DA, ...o });
+    fields.push(ref);
+    annots.push(ref);
+    return ref;
+  };
+  const money = { F: { S: "JavaScript", JS: S('AFNumber_Format(2, 0, 0, 0, "$", true);') }, K: { S: "JavaScript", JS: S('AFNumber_Keystroke(2, 0, 0, 0, "$", true);') } };
+  add({ FT: "Tx", T: S("name"), TU: S("Full name"), Rect: row(0), Ff: 2 });
+  add({ FT: "Tx", T: S("qtyA"), TU: S("Quantity A"), Rect: row(1, 80), V: S("2"), AA: { F: { S: "JavaScript", JS: S('AFNumber_Format(0, 0, 0, 0, "", true);') } } });
+  add({ FT: "Tx", T: S("qtyB"), TU: S("Quantity B"), Rect: row(2, 80), V: S("3") });
+  const total = add({
+    FT: "Tx", T: S("total"), TU: S("Total"), Rect: row(3, 120), Ff: 1,
+    AA: { ...money, C: { S: "JavaScript", JS: S('AFSimple_Calculate("SUM", new Array("qtyA", "qtyB"));') } },
+  });
+  add({ FT: "Tx", T: S("date"), TU: S("Delivery date"), Rect: row(4, 120), AA: { F: { S: "JavaScript", JS: S('AFDate_FormatEx("mm/dd/yyyy");') }, K: { S: "JavaScript", JS: S('AFDate_KeystrokeEx("mm/dd/yyyy");') } } });
+  add({ FT: "Btn", T: S("subscribe"), TU: S("Subscribe to updates"), Rect: row(5, 16, 16), DA: S("/ZaDb 0 Tf 0 g"), MK: { CA: S("4") }, V: "Off", AS: "Off" });
+  const radio = doc.addObject({ FT: "Btn", T: S("size"), TU: S("Size"), Ff: 49152, V: "Off", Kids: [] });
+  fields.push(radio);
+  ["S", "L"].forEach((state, i) => {
+    const kid = doc.addObject({
+      Type: "Annot", Subtype: "Widget", Parent: radio, F: 4, P: page, DA: S("/ZaDb 0 Tf 0 g"), MK: { CA: S("l") }, AS: "Off",
+      Rect: [180 + i * 60, 692 - 6 * 40, 196 + i * 60, 708 - 6 * 40],
+      AP: { N: { [state]: doc.addStream("", {}), Off: doc.addStream("", {}) } },
+    });
+    radio.get("Kids").push(kid);
+    annots.push(kid);
+  });
+  add({ FT: "Ch", T: S("colour"), TU: S("Colour"), Ff: 131072, Opt: [S("Red"), S("Green"), S("Blue")], V: S("Green"), Rect: row(7, 120) });
+  add({ FT: "Ch", T: S("delivery"), TU: S("Delivery"), Opt: [S("Standard"), S("Express"), S("Pickup")], Rect: [180, 692 - 8 * 40 - 20, 300, 712 - 8 * 40] });
+  add({ FT: "Tx", T: S("notes"), TU: S("Notes"), Ff: 4096, Rect: [180, 692 - 9 * 40 - 40, 500, 712 - 9 * 40] });
+  page.put("Annots", annots);
+  doc.getTrailer().get("Root").put("AcroForm", { Fields: fields, DA: S("/Helv 0 Tf 0 g"), DR: { Font: { Helv: helv, ZaDb: zadb } }, NeedAppearances: true, CO: [total] });
+  writeFileSync(new URL("form.pdf", out), doc.saveToBuffer("").asUint8Array());
+}
+
+// Self-signed test identity for signature tests (password "test"), using 3DES like older Windows exports.
+{
+  const keys = forge.pki.rsa.generateKeyPair(2048);
+  const cert = forge.pki.createCertificate();
+  cert.publicKey = keys.publicKey;
+  cert.serialNumber = "01";
+  cert.validity.notBefore = new Date("2024-01-01T00:00:00Z");
+  cert.validity.notAfter = new Date("2036-01-01T00:00:00Z");
+  const attrs = [
+    { name: "commonName", value: "Test Signer" },
+    { name: "organizationName", value: "PDForge Tests" },
+    { name: "emailAddress", value: "signer@example.com" },
+  ];
+  cert.setSubject(attrs);
+  cert.setIssuer(attrs);
+  cert.setExtensions([{ name: "keyUsage", digitalSignature: true, nonRepudiation: true }]);
+  cert.sign(keys.privateKey, forge.md.sha256.create());
+  const p12 = forge.pkcs12.toPkcs12Asn1(keys.privateKey, [cert], "test", { algorithm: "3des", friendlyName: "Test Signer" });
+  writeFileSync(new URL("test-signer.p12", out), Buffer.from(forge.asn1.toDer(p12).getBytes(), "binary"));
+}
 
 console.log("fixtures written");

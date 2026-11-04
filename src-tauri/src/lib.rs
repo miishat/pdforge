@@ -42,6 +42,97 @@ async fn write_file(request: Request<'_>) -> Result<(), String> {
     })
 }
 
+/// The Windows account name, used as the default author of comments.
+#[tauri::command]
+fn user_name() -> String {
+    std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "Me".into())
+}
+
+/// Crash recovery: unsaved documents are copied here every so often and offered back on the next start.
+fn recovery_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| format!("No app data folder: {e}"))?
+        .join("recovery");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't create the recovery folder: {e}"))?;
+    Ok(dir)
+}
+
+fn recovery_key(raw: &str) -> Result<String, String> {
+    let key: String = raw.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').take(64).collect();
+    if key.is_empty() {
+        Err("Invalid recovery key.".into())
+    } else {
+        Ok(key)
+    }
+}
+
+#[tauri::command]
+async fn recovery_save(app: tauri::AppHandle, request: Request<'_>) -> Result<(), String> {
+    let InvokeBody::Raw(bytes) = request.body() else {
+        return Err("Expected file contents.".into());
+    };
+    let header = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(percent_decode)
+            .ok_or(format!("Missing {name}."))
+    };
+    let key = recovery_key(&header("key")?)?;
+    let meta = header("meta")?;
+    let dir = recovery_dir(&app)?;
+    let pdf = dir.join(format!("{key}.pdf"));
+    let tmp = dir.join(format!("{key}.pdf.tmp"));
+    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &pdf).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join(format!("{key}.json")), meta).map_err(|e| e.to_string())
+}
+
+#[derive(serde::Serialize)]
+struct RecoveryEntry {
+    key: String,
+    meta: String,
+}
+
+#[tauri::command]
+fn recovery_list(app: tauri::AppHandle) -> Result<Vec<RecoveryEntry>, String> {
+    let dir = recovery_dir(&app)?;
+    let mut out = vec![];
+    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let key = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
+        if dir.join(format!("{key}.pdf")).is_file() {
+            if let Ok(meta) = std::fs::read_to_string(&path) {
+                out.push(RecoveryEntry { key, meta });
+            }
+        }
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+async fn recovery_read(app: tauri::AppHandle, key: String) -> Result<Response, String> {
+    let path = recovery_dir(&app)?.join(format!("{}.pdf", recovery_key(&key)?));
+    std::fs::read(&path).map(Response::new).map_err(|e| io_message(&path, "read", e))
+}
+
+#[tauri::command]
+fn recovery_clear(app: tauri::AppHandle, key: String) -> Result<(), String> {
+    let dir = recovery_dir(&app)?;
+    let key = recovery_key(&key)?;
+    let _ = std::fs::remove_file(dir.join(format!("{key}.pdf")));
+    let _ = std::fs::remove_file(dir.join(format!("{key}.json")));
+    Ok(())
+}
+
 fn io_message(path: &PathBuf, verb: &str, e: std::io::Error) -> String {
     match e.kind() {
         std::io::ErrorKind::NotFound => format!("{} doesn't exist any more.", path.display()),
@@ -104,14 +195,30 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(LaunchFiles(Mutex::new(files_from_args(std::env::args(), None))))
-        .invoke_handler(tauri::generate_handler![launch_files, read_file, write_file])
+        .invoke_handler(tauri::generate_handler![
+            launch_files,
+            read_file,
+            write_file,
+            user_name,
+            recovery_save,
+            recovery_list,
+            recovery_read,
+            recovery_clear
+        ])
         .run(tauri::generate_context!())
         .expect("error while running PDForge");
 }
 
 #[cfg(test)]
 mod tests {
-    use super::percent_decode;
+    use super::{percent_decode, recovery_key};
+
+    #[test]
+    fn recovery_keys_cannot_escape_the_folder() {
+        assert_eq!(recovery_key("../../evil").unwrap(), "evil");
+        assert_eq!(recovery_key("tab-12-abc").unwrap(), "tab-12-abc");
+        assert!(recovery_key("../..").is_err());
+    }
 
     #[test]
     fn decodes_windows_paths() {

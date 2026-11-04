@@ -70,6 +70,92 @@ export async function saveBytes(suggestedName: string, bytes: Uint8Array): Promi
   return true;
 }
 
+/** Overwrites a file on disk (atomically: temp file + rename). Desktop only. */
+export async function writePath(path: string, bytes: Uint8Array): Promise<void> {
+  if (!isDesktop) throw new Error("Saving in place needs the desktop app.");
+  await invoke("write_file", bytes, { headers: { path: encodeURIComponent(path) } });
+}
+
+/** Asks for a location and saves. Returns the chosen path, "" in the browser (downloaded), or null if cancelled. */
+export async function saveAs(suggestedName: string, bytes: Uint8Array, filter = { name: "PDF document", extensions: ["pdf"] }): Promise<string | null> {
+  if (isDesktop) {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const path = await save({ defaultPath: suggestedName, filters: [filter] });
+    if (!path) return null;
+    await writePath(path, bytes);
+    return path;
+  }
+  await saveBytes(suggestedName, bytes);
+  return "";
+}
+
+/** Picks one file of any of the given extensions and returns it. */
+export async function pickFile(filter: { name: string; extensions: string[] }): Promise<PickedFile | null> {
+  if (isDesktop) {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const path = await open({ multiple: false, filters: [filter] });
+    return typeof path === "string" ? readPath(path) : null;
+  }
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = filter.extensions.map((e) => `.${e}`).join(",");
+    input.onchange = async () => resolve(input.files?.[0] ? await fromBrowserFile(input.files[0]) : null);
+    input.oncancel = () => resolve(null);
+    input.click();
+  });
+}
+
+let cachedUser: string | null = null;
+/** The Windows account name, used as the default comment author. */
+export async function userName(): Promise<string> {
+  if (cachedUser) return cachedUser;
+  cachedUser = isDesktop ? await invoke<string>("user_name").catch(() => "Me") : "Me";
+  return cachedUser;
+}
+
+export interface RecoveryMeta {
+  name: string;
+  path: string | null;
+  savedAt: number;
+}
+
+export async function recoverySave(key: string, meta: RecoveryMeta, bytes: Uint8Array): Promise<void> {
+  if (!isDesktop) return;
+  await invoke("recovery_save", bytes, { headers: { key: encodeURIComponent(key), meta: encodeURIComponent(JSON.stringify(meta)) } });
+}
+
+export async function recoveryList(): Promise<{ key: string; meta: RecoveryMeta }[]> {
+  if (!isDesktop) return [];
+  const raw = await invoke<{ key: string; meta: string }[]>("recovery_list").catch(() => []);
+  return raw.flatMap((r) => {
+    try {
+      return [{ key: r.key, meta: JSON.parse(r.meta) as RecoveryMeta }];
+    } catch {
+      return [];
+    }
+  });
+}
+
+export async function recoveryRead(key: string): Promise<Uint8Array> {
+  return new Uint8Array(await invoke<ArrayBuffer>("recovery_read", { key }));
+}
+
+export async function recoveryClear(key: string): Promise<void> {
+  if (isDesktop) await invoke("recovery_clear", { key }).catch(() => {});
+}
+
+/** Lets the app veto closing the window (to ask about unsaved changes). Returns an unsubscribe function. */
+export async function onWindowCloseRequested(handler: () => Promise<boolean>): Promise<() => void> {
+  if (!isDesktop) return () => {};
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  const win = getCurrentWindow();
+  return win.onCloseRequested(async (event) => {
+    event.preventDefault();
+    if (await handler()) await win.destroy();
+  });
+}
+
 /** Opens a web or mail link in the default app. Callers must confirm with the user first. */
 export async function openExternal(url: string): Promise<void> {
   if (!/^(https?:|mailto:)/i.test(url)) throw new Error("Only web and email links can be opened.");

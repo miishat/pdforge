@@ -106,13 +106,87 @@ export interface LayerInfo {
   visible: boolean;
 }
 
+export type Point = [number, number];
+export type Color = [number, number, number];
+
 export interface AnnotationInfo {
+  /** PDF object number; stable for the life of the open document. */
+  id: number;
   page: number;
   type: string;
+  /** Bounds in page space. */
+  rect: Rect;
   contents: string;
   author: string;
+  subject: string;
   modified: string | null;
-  rect: Rect;
+  created: string | null;
+  color: Color | null;
+  interiorColor: Color | null;
+  opacity: number;
+  borderWidth: number;
+  /** Object number of the annotation this one replies to (comment threads). */
+  inReplyTo: number | null;
+  /** Review state for state-only replies: Accepted, Rejected, Cancelled, Completed, None. */
+  state: string | null;
+  icon: string | null;
+  intent: string | null;
+  lineEndings: [string, string] | null;
+  fontSize: number | null;
+  /** Hidden or reply annotations aren't drawn on the page. */
+  hidden: boolean;
+  /** Rectangle-based annotations can be resized by their corners. */
+  resizable: boolean;
+}
+
+export type MarkupType = "Highlight" | "Underline" | "StrikeOut" | "Squiggly";
+
+export type NewAnnotation = AnnotationStyle & { author: string; contents?: string; subject?: string } & (
+    | { type: MarkupType; quads: Quad[] }
+    | { type: "Text"; point: Point; icon?: string }
+    | { type: "FreeText"; rect: Rect; fontSize: number; callout?: Point[] }
+    | { type: "Square" | "Circle"; rect: Rect }
+    | { type: "Line"; line: [Point, Point]; endings?: [string, string]; intent?: "LineArrow" | "LineDimension"; caption?: boolean; measure?: MeasureScale }
+    | { type: "Polygon" | "PolyLine"; vertices: Point[]; intent?: "PolygonDimension" | "PolyLineDimension"; measure?: MeasureScale }
+    | { type: "Ink"; strokes: Point[][] }
+    | { type: "Stamp"; rect: Rect; icon?: string; image?: Uint8Array }
+  );
+
+export interface AnnotationStyle {
+  color?: Color;
+  interiorColor?: Color | null;
+  opacity?: number;
+  borderWidth?: number;
+}
+
+/** How many real-world units one PDF point represents, for measurement annotations. */
+export interface MeasureScale {
+  /** Real-world units per PDF inch (72 pt). */
+  ratio: number;
+  unit: string;
+}
+
+export interface AnnotationPatch extends AnnotationStyle {
+  rect?: Rect;
+  translate?: Point;
+  contents?: string;
+  fontSize?: number;
+  lineEndings?: [string, string];
+  author?: string;
+}
+
+/** Pages whose rendering changed; null means "any page" (after undo/redo). */
+export interface EditResult {
+  pages: number[] | null;
+  id?: number;
+}
+
+export interface EditState {
+  canUndo: boolean;
+  canRedo: boolean;
+  dirty: boolean;
+  undoLabel: string | null;
+  redoLabel: string | null;
 }
 
 export interface FontInfo {

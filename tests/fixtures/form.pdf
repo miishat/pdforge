@@ -1,0 +1,144 @@
+%PDF-1.7
+%µ¶
+% Written by MuPDF 1.28.1
+
+1 0 obj
+<</Type/Catalog/Pages 2 0 R/Info<</Producer(MuPDF 1.28.1)>>/AcroForm<</Fields[8 0 R 9 0 R 10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 21 0 R 22 0 R 23 0 R]/DA(/Helv 0 Tf 0 g)/DR<</Font<</Helv 3 0 R/ZaDb 4 0 R>>>>/NeedAppearances true/CO[11 0 R]>>>>
+endobj
+
+2 0 obj
+<</Type/Pages/Count 1/Kids[7 0 R]>>
+endobj
+
+3 0 obj
+<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>
+endobj
+
+4 0 obj
+<</Type/Font/Subtype/Type1/BaseFont/ZapfDingbats>>
+endobj
+
+5 0 obj
+<</Font<</Helv 3 0 R>>>>
+endobj
+
+6 0 obj
+<</Length 277>>
+stream
+BT /Helv 18 Tf 72 740 Td (Order form) Tj ET
+BT /Helv 11 Tf 72 700 Td (Name) Tj 0 -40 Td (Quantity A) Tj 0 -40 Td (Quantity B) Tj 0 -40 Td (Total) Tj 0 -40 Td (Date) Tj 0 -40 Td (Subscribe) Tj 0 -40 Td (Size) Tj 0 -40 Td (Colour) Tj 0 -40 Td (Delivery) Tj 0 -40 Td (Notes) Tj ET
+endstream
+endobj
+
+7 0 obj
+<</Type/Page/MediaBox[0 0 612 792]/Rotate 0/Resources 5 0 R/Contents 6 0 R/Parent 2 0 R/Annots[8 0 R 9 0 R 10 0 R 11 0 R 12 0 R 13 0 R 17 0 R 20 0 R 21 0 R 22 0 R 23 0 R]>>
+endobj
+
+8 0 obj
+<</Type/Annot/Subtype/Widget/F 4/P 7 0 R/DA(/Helv 11 Tf 0 g)/FT/Tx/T(name)/TU(Full name)/Rect[180 692 380 712]/Ff 2>>
+endobj
+
+9 0 obj
+<</Type/Annot/Subtype/Widget/F 4/P 7 0 R/DA(/Helv 11 Tf 0 g)/FT/Tx/T(qtyA)/TU(Quantity A)/Rect[180 652 260 672]/V(2)/AA<</F<</S/JavaScript/JS(AFNumber_Format\(0, 0, 0, 0, "", true\);)>>>>>>
+endobj
+
+10 0 obj
+<</Type/Annot/Subtype/Widget/F 4/P 7 0 R/DA(/Helv 11 Tf 0 g)/FT/Tx/T(qtyB)/TU(Quantity B)/Rect[180 612 260 632]/V(3)>>
+endobj
+
+11 0 obj
+<</Type/Annot/Subtype/Widget/F 4/P 7 0 R/DA(/Helv 11 Tf 0 g)/FT/Tx/T(total)/TU(Total)/Rect[180 572 300 592]/Ff 1/AA<</F<</S/JavaScript/JS(AFNumber_Format\(2, 0, 0, 0, "$", true\);)>>/K<</S/JavaScript/JS(AFNumber_Keystroke\(2, 0, 0, 0, "$", true\);)>>/C<</S/JavaScript/JS(AFSimple_Calculate\("SUM", new Array\("qtyA", "qtyB"\)\);)>>>>>>
+endobj
+
+12 0 obj
+<</Type/Annot/Subtype/Widget/F 4/P 7 0 R/DA(/Helv 11 Tf 0 g)/FT/Tx/T(date)/TU(Delivery date)/Rect[180 532 300 552]/AA<</F<</S/JavaScript/JS(AFDate_FormatEx\("mm/dd/yyyy"\);)>>/K<</S/JavaScript/JS(AFDate_KeystrokeEx\("mm/dd/yyyy"\);)>>>>>>
+endobj
+
+13 0 obj
+<</Type/Annot/Subtype/Widget/F 4/P 7 0 R/DA(/ZaDb 0 Tf 0 g)/FT/Btn/T(subscribe)/TU(Subscribe to updates)/Rect[180 492 196 508]/MK<</CA(4)>>/V/Off/AS/Off>>
+endobj
+
+14 0 obj
+<</FT/Btn/T(size)/TU(Size)/Ff 49152/V/Off/Kids[17 0 R 20 0 R]>>
+endobj
+
+15 0 obj
+<</Length 0>>
+stream
+
+endstream
+endobj
+
+16 0 obj
+<</Length 0>>
+stream
+
+endstream
+endobj
+
+17 0 obj
+<</Type/Annot/Subtype/Widget/Parent 14 0 R/F 4/P 7 0 R/DA(/ZaDb 0 Tf 0 g)/MK<</CA(l)>>/AS/Off/Rect[180 452 196 468]/AP<</N<</S 15 0 R/Off 16 0 R>>>>>>
+endobj
+
+18 0 obj
+<</Length 0>>
+stream
+
+endstream
+endobj
+
+19 0 obj
+<</Length 0>>
+stream
+
+endstream
+endobj
+
+20 0 obj
+<</Type/Annot/Subtype/Widget/Parent 14 0 R/F 4/P 7 0 R/DA(/ZaDb 0 Tf 0 g)/MK<</CA(l)>>/AS/Off/Rect[240 452 256 468]/AP<</N<</L 18 0 R/Off 19 0 R>>>>>>
+endobj
+
+21 0 obj
+<</Type/Annot/Subtype/Widget/F 4/P 7 0 R/DA(/Helv 11 Tf 0 g)/FT/Ch/T(colour)/TU(Colour)/Ff 131072/Opt[(Red)(Green)(Blue)]/V(Green)/Rect[180 412 300 432]>>
+endobj
+
+22 0 obj
+<</Type/Annot/Subtype/Widget/F 4/P 7 0 R/DA(/Helv 11 Tf 0 g)/FT/Ch/T(delivery)/TU(Delivery)/Opt[(Standard)(Express)(Pickup)]/Rect[180 352 300 392]>>
+endobj
+
+23 0 obj
+<</Type/Annot/Subtype/Widget/F 4/P 7 0 R/DA(/Helv 11 Tf 0 g)/FT/Tx/T(notes)/TU(Notes)/Ff 4096/Rect[180 292 500 352]>>
+endobj
+
+xref
+0 24
+0000000000 65535 f 
+0000000042 00000 n 
+0000000298 00000 n 
+0000000350 00000 n 
+0000000439 00000 n 
+0000000506 00000 n 
+0000000547 00000 n 
+0000000874 00000 n 
+0000001063 00000 n 
+0000001197 00000 n 
+0000001403 00000 n 
+0000001539 00000 n 
+0000001892 00000 n 
+0000002148 00000 n 
+0000002320 00000 n 
+0000002401 00000 n 
+0000002450 00000 n 
+0000002499 00000 n 
+0000002667 00000 n 
+0000002716 00000 n 
+0000002765 00000 n 
+0000002933 00000 n 
+0000003105 00000 n 
+0000003271 00000 n 
+
+trailer
+<</Size 24/Root 1 0 R>>
+startxref
+3406
+%%EOF
