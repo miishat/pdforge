@@ -106,7 +106,12 @@ test.describe("organize", () => {
     await dialog.getByRole("button", { name: "Combine 2 files" }).click();
     await expect(page.getByRole("tab", { name: /Combined\.pdf/ })).toHaveAttribute("aria-selected", "true");
     await expect(view(page).locator(".page-input__total")).toHaveText("of 8");
-    await page.keyboard.press("F4");
+    // The new tab registers its shortcuts just after it appears; on a slow machine the first F4 can land before that.
+    const sidebar = view(page).getByRole("button", { name: "Sidebar", exact: true });
+    await expect(async () => {
+      if ((await sidebar.getAttribute("aria-pressed")) !== "true") await page.keyboard.press("F4");
+      await expect(sidebar).toHaveAttribute("aria-pressed", "true", { timeout: 1000 });
+    }).toPass();
     await page.getByRole("tab", { name: "Bookmarks" }).click();
     await expect(page.locator(".tree__label")).toHaveText(["sample", "features"]);
   });
