@@ -70,6 +70,31 @@ The full brief is in [docs/PROMPT.md](docs/PROMPT.md); progress is tracked in [d
 - Redaction uses MuPDF's `applyRedactions`. Because incremental saves keep earlier revisions, the engine sets
   `requireFullSave` after redaction or sanitising, and the next save is a full, garbage-collected rewrite.
 
+## Transform and protect (Phase 4)
+
+- Security is applied when the file is written (MuPDF save options `encrypt=aes-256,…`), so the engine keeps a
+  pending change and the tab counts as unsaved. After the save, the document is reloaded from the written bytes and
+  unlocked with the owner password. MuPDF's `needsPassword()` forgets an earlier authentication, so the engine records
+  it once at open and never calls it afterwards.
+- Compression measures each image's on-page size with a custom `Device` (image pointers match `loadImage`, thanks to
+  MuPDF's store), downsamples in JS with area averaging, re-encodes as JPEG and keeps the result only when smaller.
+  Save options that change the document they write (`objstms`, `clean`) go through a temporary copy, so saving never
+  adds an undo step.
+- Conversions to Markdown, HTML and DOCX share one inferred model (headings from font size relative to the body size,
+  paragraphs from spacing, list items from markers, runs from per-character font styles). DOCX is written with a
+  small ZIP writer (`src/core/zip.ts`, platform `CompressionStream`). Office, HTML, text, e-books and images are laid
+  out by MuPDF's own document handlers and written with its PDF `DocumentWriter`.
+- PDF/A-2b conversion fixes what it can (standard fonts embedded from MuPDF's built-in URW CFF programs as WinAnsi
+  Type1C fonts, a generated sRGB ICC profile as output intent, XMP metadata matching the Info dictionary, actions,
+  attachments, annotation flags/appearances) and reports the rest. It is a checker, not a certified validator.
+- OCR: Tesseract (tesseract.js 7, LSTM-only WebAssembly cores) runs in its own worker. A Vite plugin serves the
+  worker, cores and the English model from `/tesseract/`, so nothing loads from a CDN; other languages are fetched
+  on request into the IndexedDB cache Tesseract reads. Tesseract returns a text-only PDF per page image (glyph-less
+  embedded font, invisible text); the engine places it as a form XObject mapped from image space to the page
+  (`/PDForgeOCR` marks it for replacement). Deskewing rotates the page content by Tesseract's detected angle so the
+  scan and the text layer line up.
+- `vite preview` sends the desktop app's CSP, so end-to-end tests run under the same rules as the app.
+
 ## Key risks and mitigations
 
 | Risk | Mitigation |

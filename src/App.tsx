@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { engine } from "./core/client";
 import type { DocInfo } from "./core/types";
 import {
-  fromBrowserFile, isDesktop, launchFiles, onOpenFiles, onWindowCloseRequested, pickPdfs, readPath, recoveryClear, recoveryList,
+  fromBrowserFile, isDesktop, launchFiles, onOpenFiles, onWindowCloseRequested, pickFiles, pickPdfs, readPath, recoveryClear, recoveryList,
   recoveryRead, setWindowTitle, type PickedFile, type RecoveryMeta,
 } from "./platform";
 import { UnsavedDialog } from "./ui/doc/Dialogs";
@@ -13,6 +13,8 @@ import { addRecent, loadRecent, removeRecent, samePath, saveRecent, updateRecent
 import { StartScreen } from "./ui/StartScreen";
 import { TitleBar } from "./ui/TitleBar";
 import { useTabs, type Tab } from "./ui/useTabs";
+import { IMPORTABLE } from "./core/convert";
+import { defaultPaper } from "./ui/paper";
 
 /** Distinguishes this run's recovery files from those left by a previous (crashed) run. */
 const SESSION = Date.now().toString(36);
@@ -64,19 +66,49 @@ export function App() {
 
   useEffect(() => saveRecent(recent), [recent]);
 
-  const openFiles = useCallback((files: PickedFile[]) => files.forEach((f) => open(f, rememberedPage(f.path))), [open]);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  /** Lays out Office documents, web pages, text and images as a new, unsaved PDF tab. */
+  const convertAndOpen = useCallback(
+    async (files: PickedFile[], name: string, fitImages: boolean) => {
+      try {
+        const bytes = await engine().call("convertToPdf", files.map((f) => ({ name: f.name, bytes: f.bytes })), { pageSize: defaultPaper().size, fitImages });
+        await open({ name, path: null, bytes }, 0, { recovered: true });
+      } catch (err) {
+        setNotice(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [open],
+  );
+
+  const openFiles = useCallback(
+    (files: PickedFile[]) => {
+      for (const f of files) {
+        const ext = f.name.split(".").pop()?.toLowerCase() ?? "";
+        if (ext !== "pdf" && IMPORTABLE[ext]) void convertAndOpen([f], f.name.replace(/\.[^.]+$/, "") + ".pdf", false);
+        else void open(f, rememberedPage(f.path));
+      }
+    },
+    [open, convertAndOpen],
+  );
+  const createPdf = useCallback(async () => {
+    const files = await pickFiles({ name: "Documents and images", extensions: Object.keys(IMPORTABLE) });
+    if (!files.length) return;
+    const name = files.length === 1 ? files[0].name.replace(/\.[^.]+$/, "") + ".pdf" : "Combined.pdf";
+    await convertAndOpen(files, name, true);
+  }, [convertAndOpen]);
   const openPaths = useCallback(
     async (paths: string[]) => {
       for (const p of paths) {
         try {
-          await open(await readPath(p), rememberedPage(p));
+          openFiles([await readPath(p)]);
         } catch (err) {
           setMissing((m) => new Set(m).add(p));
           console.warn(err);
         }
       }
     },
-    [open],
+    [openFiles],
   );
   const openDialog = useCallback(() => pickPdfs().then(openFiles), [openFiles]);
 
@@ -147,8 +179,7 @@ export function App() {
         else if (p.type === "leave") setDragging(false);
         else if (p.type === "drop") {
           setDragging(false);
-          const pdfs = p.paths.filter((path) => path.toLowerCase().endsWith(".pdf"));
-          void openPaths(pdfs.length ? pdfs : p.paths.slice(0, 1));
+          void openPaths(p.paths);
         }
       });
     });
@@ -182,8 +213,15 @@ export function App() {
   return (
     <div className="app" {...browserDrop}>
       <TitleBar tabs={tabs} activeId={activeId} onActivate={setActiveId} onClose={close} onNew={openDialog} />
+      {notice && (
+        <div className="infobar infobar--bad app-notice" role="alert">
+          {notice}
+          <button className="link-button" onClick={() => setNotice(null)}>Dismiss</button>
+        </div>
+      )}
       {!active && (
         <StartScreen
+          onCreate={() => void createPdf()}
           recoveries={recoveries}
           onRecover={async (r) => {
             try {

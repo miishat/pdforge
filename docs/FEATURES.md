@@ -98,7 +98,34 @@ close-window prompt (all are desktop-only paths; the browser test build download
   removing content in hidden layers, non-Latin text in headers/watermarks (standard fonts only)
 
 ## Phase 4: Transform and protect
-- ⬜ OCR (Tesseract), compress/optimize, passwords and permissions, conversions, PDF/A, repair
+- ✅ Protect mode (Ctrl+Shift+6) with Security, Recognise text, Compress, Export, PDF/A and Repair
+- ✅ Security: AES-256 encryption; password to open; permissions (print full/low quality/none, copy, change content,
+  comments, forms, page assembly, screen readers) behind a permissions password. Applied on save and can be cancelled
+  before then. Files with an owner password need it before their security can be changed. Remove security;
+  weak (RC4/40-bit) encryption is flagged
+- ✅ OCR with Tesseract 5 (tesseract.js), fully offline for English. Other languages (30 listed) are downloaded once on
+  request, then cached. Adds an invisible, searchable and selectable text layer that lines up with the printed words;
+  straightens skewed scans; skips pages that already have text unless asked; re-running replaces the earlier layer;
+  progress, cancel, one undo step
+- ✅ Compress: Screen (72 dpi), E-book (150 dpi), Print (300 dpi) or custom (resolution, JPEG quality, recompress,
+  font subsetting, duplicate/unused object removal, object streams). Images are measured where they're drawn and
+  downsampled with area averaging; new images are kept only when smaller. Shows the size before and after, with Undo
+- ✅ Export: Word (.docx), Markdown, HTML (headings, paragraphs, bulleted/numbered lists, bold/italic/code, images),
+  plain text, and images (PNG, JPEG with quality, TIFF incl. multi-page) at 72–600 dpi, for all pages or a range.
+  Reflowed formats are best effort and say so
+- ✅ Create PDFs from Word, Excel, PowerPoint, HTML, text, EPUB, FictionBook, CBZ and images (PNG, JPEG, GIF, BMP,
+  TIFF, JXR): from the start screen (several files combine into one), by dropping or opening them. Text stays text;
+  paper size follows the region (Letter/A4)
+- ✅ PDF/A-2b: check (encryption, fonts, output intent, scripts and actions, attachments, annotation flags and
+  appearances, forms/XFA, LZW/interpolation, CMYK, layers, page sizes, XMP identification) with a pass/fixed/fail
+  report, and convert: embeds standard fonts (metric-compatible URW fonts), adds an sRGB output intent and matching
+  XMP/Info metadata, removes scripts, forbidden actions and attachments, fixes annotations. One undo step
+- ✅ Repair: damaged files (broken cross-reference tables, missing header, junk before the header, truncation) are
+  rebuilt on open with a notice; Repair checks every page and writes a clean full rewrite
+- 🟡 Not yet: PDF/A for files with unembedded non-standard fonts or CMYK content (reported, not fixed); certified PDF/A
+  validation (the report isn't veraPDF, which I couldn't run in this environment); DOCX tables and multi-column
+  reflow; layout-preserving (absolutely positioned) HTML; OCR of rotated (90°) pages without first rotating them;
+  Office import is MuPDF's (simple formatting only); passwords with commas or "=" (MuPDF option syntax)
 
 ## Phase 5: Beyond Acrobat
 - ⬜ Compare, batch workflows, command palette, split view, accessibility checker, table extraction, optional AI assistant

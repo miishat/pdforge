@@ -37,7 +37,7 @@ Most match Acrobat, so your habits carry over.
 | Print / properties | Ctrl+P / Ctrl+D |
 | Save / save as | Ctrl+S / Ctrl+Shift+S |
 | Undo / redo | Ctrl+Z / Ctrl+Y |
-| Read / Comment / Fill & Sign / Organize / Edit mode | Ctrl+Shift+1 / 2 / 3 / 4 / 5 |
+| Read / Comment / Fill & Sign / Organize / Edit / Protect mode | Ctrl+Shift+1 / 2 / 3 / 4 / 5 / 6 |
 | Organize: select all / delete pages | Ctrl+A / Del |
 | Delete / nudge selected comment | Del / arrow keys (Shift for 10 pt) |
 | Finish a polygon | Double-click or Enter |

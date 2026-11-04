@@ -475,7 +475,7 @@ function StyleControls(p: Common) {
   );
 }
 
-function UndoRedo(p: Common) {
+export function UndoRedo(p: Pick<Common, "canUndo" | "canRedo" | "undoLabel" | "redoLabel" | "onUndo" | "onRedo">) {
   return (
     <div className="modebar__group">
       <button className="icon-button" aria-label="Undo" title={p.undoLabel ? `Undo ${p.undoLabel.toLowerCase()} (Ctrl+Z)` : "Undo (Ctrl+Z)"} disabled={!p.canUndo} onClick={p.onUndo}>
@@ -488,7 +488,7 @@ function UndoRedo(p: Common) {
   );
 }
 
-function Divider() {
+export function Divider() {
   return <div className="toolbar__divider" />;
 }
 
@@ -499,6 +499,7 @@ export function ModeSwitch({ mode, onMode }: { mode: Mode; onMode: (m: Mode) => 
     ["fill", "Fill & Sign", "Ctrl+Shift+3"],
     ["organize", "Organize", "Ctrl+Shift+4"],
     ["edit", "Edit", "Ctrl+Shift+5"],
+    ["protect", "Protect", "Ctrl+Shift+6"],
   ];
   return (
     <div className="mode-switch" role="tablist" aria-label="Mode">

@@ -7,3 +7,6 @@
 - All colors, sizes and motion come from `src/styles/tokens.css`. Avoid the "generic AI look" listed in the brief.
 - Before calling work done: `npm run typecheck`, `npm test`, `npm run test:e2e`, plus light/dark screenshots of changed screens.
 - In the cloud container, Playwright needs `PW_CHROMIUM=/opt/pw-browsers/chromium`. The Windows installer is built by CI only.
+- MuPDF gotchas: never call `needsPassword()` after authenticating (it drops the authentication); stream reads and
+  writes need the indirect object, not `.resolve()`; save options `objstms`/`clean` modify the document (use a copy).
+- OCR assets (Tesseract worker, cores, English model) are served by the Vite plugin in `vite.config.ts`, not committed.

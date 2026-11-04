@@ -19,6 +19,14 @@ import {
 import { pageWidgets, resetForm, setFieldValue, summarize, type FormSummary, type WidgetInfo } from "./forms";
 import { openIdentity, signDocument, verifySignatures, type Identity, type SignatureInfo, type SignOptions } from "./signing";
 import { buildPattern, searchLayer } from "./textlayer";
+import {
+  describeEncryption, fromEnginePermissions, securityOptions, validateSecurity,
+  type PendingSecurity, type PermissionSet, type SecuritySpec,
+} from "./protect";
+import { convertToPdf, documentModel, toDocx, toHtml, toMarkdown, toText, toTiff } from "./convert";
+import { addOcrLayer, hasOcrLayer, hasText, ocrImage, removeOcrLayer, type OcrPage } from "./ocr";
+import { hasSignatures, pdfA, type PdfAReport } from "./pdfa";
+import { compressImages, saveOptionsFor, type CompressOptions, type CompressReport } from "./optimize";
 import type {
   AnnotationInfo,
   AnnotationPatch,
@@ -85,6 +93,41 @@ interface OpenDoc {
   requireFullSave?: boolean;
   /** Journal position at the last save; the document is dirty when the position differs. */
   savedPosition: number;
+  /** MuPDF options for the next full save (set by compressing or repairing). */
+  saveOptions?: string;
+  /** Encryption to add or remove when the file is next saved. */
+  pendingSecurity?: PendingSecurity;
+  /** The password the file was opened with, and whether it was the owner (permissions) password. */
+  password?: string;
+  ownerAccess: boolean;
+  /**
+   * Whether opening needs a password. Recorded at open: MuPDF's needsPassword() forgets an
+   * earlier successful authentication, so it must not be called afterwards.
+   */
+  hasOpenPassword: boolean;
+}
+
+export interface SecurityState {
+  encrypted: boolean;
+  /** e.g. "AES 256-bit". */
+  method: string;
+  /** RC4 or keys shorter than 128 bits. */
+  weak: boolean;
+  /** Whether opening the file needs a password. */
+  hasOpenPassword: boolean;
+  /** Whether security can be changed (no owner password, or it was given). */
+  canChange: boolean;
+  permissions: PermissionSet;
+  pending: "encrypt" | "decrypt" | null;
+}
+
+export interface RepairReport {
+  /** MuPDF had to rebuild the file's structure to read it. */
+  wasRepaired: boolean;
+  pageCount: number;
+  /** Pages (0-based) that still fail to draw. */
+  brokenPages: number[];
+  objects: number;
 }
 
 export class PdfEngine {
@@ -104,17 +147,23 @@ export class PdfEngine {
     const pdf = doc.asPDF();
     // Every change goes through the journal so it can be undone.
     if (pdf) safe(() => pdf.enableJournal(), undefined);
-    this.docs.set(docId, { doc, text: new Map(), bytes: bytes.slice(), savedPosition: 0 });
-    if (doc.needsPassword()) return { status: "needs-password", docId };
+    // A file with only an owner password opens without one, but its permissions can't be changed yet.
+    const hasOpenPassword = doc.needsPassword();
+    this.docs.set(docId, { doc, text: new Map(), bytes: bytes.slice(), savedPosition: 0, ownerAccess: !isEncrypted(doc), hasOpenPassword });
+    if (hasOpenPassword) return { status: "needs-password", docId };
     return { status: "ok", info: this.info(docId) };
   }
 
   /** Returns document info if the password is right; throws `bad-password` otherwise. */
   unlock(docId: number, password: string): DocInfo {
-    const { doc } = this.get(docId);
-    if (!doc.authenticatePassword(password)) {
+    const entry = this.get(docId);
+    const result = entry.doc.authenticatePassword(password);
+    if (!result) {
       throw new EngineError("That password isn't right.", "bad-password");
     }
+    entry.password = password;
+    // 4 = owner password; 6 = both passwords are the same.
+    entry.ownerAccess = (result & 4) !== 0;
     return this.info(docId);
   }
 
@@ -143,6 +192,7 @@ export class PdfEngine {
       format: meta("format"),
       labels: hasLabels ? labels : null,
       permissions: this.permissions(doc),
+      repaired: safe(() => doc.asPDF()?.wasRepaired() ?? false, false),
     };
   }
 
@@ -728,14 +778,277 @@ export class PdfEngine {
   save(docId: number, opts: { incremental?: boolean; markSaved?: boolean } = {}): Uint8Array {
     const entry = this.get(docId);
     const pdf = this.requirePdf(docId);
-    const incremental = opts.incremental !== false && !entry.requireFullSave && safe(() => pdf.canBeSavedIncrementally(), false);
-    const bytes = pdf.saveToBuffer(incremental ? "incremental" : "garbage=compact,compress").asUint8Array().slice();
+    const incremental =
+      opts.incremental !== false && !entry.requireFullSave && !entry.pendingSecurity && !entry.saveOptions &&
+      safe(() => pdf.canBeSavedIncrementally(), false);
+    const options = incremental ? "incremental" : this.fullSaveOptions(entry);
+    let bytes: Uint8Array;
+    try {
+      bytes = incremental ? pdf.saveToBuffer(options).asUint8Array().slice() : this.write(entry, pdf, options);
+    } catch (err) {
+      throw new EngineError(`The file couldn't be written (${errText(err)}).`, "edit-failed");
+    }
     if (opts.markSaved !== false) {
-      entry.savedPosition = safe(() => pdf.getJournal().position, 0);
+      const pending = entry.pendingSecurity;
       entry.dirtyOutsideJournal = false;
       entry.requireFullSave = false;
+      entry.saveOptions = undefined;
+      entry.pendingSecurity = undefined;
+      if (pending) {
+        // The open document still has the old encryption; continue from what was written.
+        const password = pending.kind === "encrypt" ? pending.spec.ownerPassword : undefined;
+        this.replaceDoc(entry, bytes, password);
+        entry.password = password;
+        entry.ownerAccess = true;
+      } else {
+        entry.savedPosition = safe(() => pdf.getJournal().position, 0);
+      }
     }
     return bytes;
+  }
+
+  // ---- Protect: security, compression, repair ----
+
+  security(docId: number): SecurityState {
+    const entry = this.get(docId);
+    const enc = describeEncryption(entry.doc.getMetaData("encryption") || null);
+    return {
+      encrypted: enc.encrypted,
+      method: enc.label,
+      weak: enc.weak,
+      hasOpenPassword: entry.hasOpenPassword,
+      canChange: entry.ownerAccess,
+      permissions: fromEnginePermissions(this.permissions(entry.doc)),
+      pending: entry.pendingSecurity?.kind ?? null,
+    };
+  }
+
+  /** Gives the permissions password for a file that opened without one, so its security can be changed. */
+  unlockOwner(docId: number, password: string): SecurityState {
+    const entry = this.get(docId);
+    const result = entry.doc.authenticatePassword(password);
+    if (!(result & 4)) throw new EngineError("That isn't the permissions password.", "bad-password");
+    entry.password = password;
+    entry.ownerAccess = true;
+    return this.security(docId);
+  }
+
+  /** Protects the file with AES-256 when it's next saved. */
+  setSecurity(docId: number, spec: SecuritySpec): SecurityState {
+    const entry = this.get(docId);
+    this.requirePdf(docId);
+    if (!entry.ownerAccess) throw new EngineError("Enter the permissions password first.", "bad-password");
+    const problem = validateSecurity(spec);
+    if (problem) throw new EngineError(problem, "edit-failed");
+    entry.pendingSecurity = { kind: "encrypt", spec };
+    entry.dirtyOutsideJournal = true;
+    return this.security(docId);
+  }
+
+  /** Removes passwords and restrictions when the file is next saved. */
+  removeSecurity(docId: number): SecurityState {
+    const entry = this.get(docId);
+    this.requirePdf(docId);
+    if (!entry.ownerAccess) throw new EngineError("Enter the permissions password first.", "bad-password");
+    entry.pendingSecurity = isEncrypted(entry.doc) ? { kind: "decrypt" } : undefined;
+    if (entry.pendingSecurity) entry.dirtyOutsideJournal = true;
+    return this.security(docId);
+  }
+
+  /** Drops a security change that hasn't been saved yet. */
+  cancelSecurityChange(docId: number): SecurityState {
+    const entry = this.get(docId);
+    entry.pendingSecurity = undefined;
+    return this.security(docId);
+  }
+
+  /**
+   * Shrinks images and fonts (one undo step) and sets up a tidy full rewrite for the next save.
+   * Returns the file size before and after, measured by writing the file.
+   */
+  compress(docId: number, opts: CompressOptions): EditResult & { report: CompressReport; before: number; after: number } {
+    const entry = this.get(docId);
+    const pdf = this.requirePdf(docId);
+    const before = this.measure(entry, pdf);
+    const report = this.edit(docId, "Compress", (p) => compressImages(p, opts));
+    entry.text.clear();
+    entry.saveOptions = saveOptionsFor(opts);
+    entry.requireFullSave = true;
+    const after = this.measure(entry, pdf);
+    return { pages: null, report, before, after };
+  }
+
+  /** Size of the file as it would be written now. */
+  fileSize(docId: number): number {
+    const entry = this.get(docId);
+    return this.measure(entry, this.requirePdf(docId));
+  }
+
+  /** Checks every page and sets up a clean rewrite of the file's structure for the next save. */
+  repair(docId: number): RepairReport {
+    const entry = this.get(docId);
+    const pdf = this.requirePdf(docId);
+    const brokenPages: number[] = [];
+    const device = new mupdf.Device({});
+    for (let i = 0; i < pdf.countPages(); i++) {
+      try {
+        const page = pdf.loadPage(i);
+        page.run(device, mupdf.Matrix.identity);
+        page.destroy();
+      } catch {
+        brokenPages.push(i);
+      }
+    }
+    device.close();
+    entry.saveOptions = "garbage=compact,clean,compress";
+    entry.requireFullSave = true;
+    entry.dirtyOutsideJournal = true;
+    return { wasRepaired: safe(() => pdf.wasRepaired(), false), pageCount: pdf.countPages(), brokenPages, objects: pdf.countObjects() };
+  }
+
+  // ---- OCR ----
+
+  /** A page rendered for text recognition (grey, content only). */
+  ocrImage(docId: number, pageIndex: number, dpi = 300): Uint8Array {
+    const page = this.pdfPage(this.requirePdf(docId), pageIndex);
+    try {
+      return ocrImage(page, dpi);
+    } finally {
+      page.destroy();
+    }
+  }
+
+  /** Which of the pages need recognising: those without real text (or every page, with `force`). */
+  ocrCandidates(docId: number, pages: number[], force: boolean): { todo: number[]; skipped: number[] } {
+    const pdf = this.requirePdf(docId);
+    const todo: number[] = [];
+    const skipped: number[] = [];
+    for (const i of pages) {
+      const page = this.pdfPage(pdf, i);
+      // A page with only our own earlier OCR layer is recognised again (replacing the layer).
+      if (force || hasOcrLayer(page) || !hasText(page)) todo.push(i);
+      else skipped.push(i);
+      page.destroy();
+    }
+    return { todo, skipped };
+  }
+
+  /** Lays recognised text over the pages, as one undoable step. */
+  addOcrLayers(docId: number, items: OcrPage[]): EditResult {
+    const r = this.edit(docId, items.length === 1 ? "Recognise text on page" : "Recognise text", (pdf) => {
+      for (const item of items) {
+        const page = this.pdfPage(pdf, item.page);
+        addOcrLayer(pdf, page, item);
+        page.destroy();
+      }
+      return { pages: items.map((i) => i.page) };
+    });
+    for (const i of items) this.get(docId).text.delete(i.page);
+    return r;
+  }
+
+  /** Removes text layers PDForge added by OCR. */
+  removeOcrLayers(docId: number): EditResult & { removed: number } {
+    let removed = 0;
+    const r = this.edit(docId, "Remove recognised text", (pdf) => {
+      const pages: number[] = [];
+      for (let i = 0; i < pdf.countPages(); i++) {
+        const page = pdf.loadPage(i);
+        if (removeOcrLayer(pdf, page)) {
+          removed++;
+          pages.push(i);
+        }
+        page.destroy();
+      }
+      return { pages };
+    });
+    this.get(docId).text.clear();
+    return { ...r, removed };
+  }
+
+  // ---- Convert ----
+
+  exportText(docId: number, pages?: number[]): string {
+    return toText(this.get(docId).doc, pages);
+  }
+
+  exportMarkdown(docId: number, opts: { images: boolean; pages?: number[] }): string {
+    return toMarkdown(documentModel(this.get(docId).doc, opts));
+  }
+
+  exportHtml(docId: number, opts: { images: boolean; pages?: number[]; title: string }): string {
+    return toHtml(documentModel(this.get(docId).doc, opts), opts.title);
+  }
+
+  async exportDocx(docId: number, opts: { images: boolean; pages?: number[]; title: string }): Promise<Uint8Array> {
+    return toDocx(documentModel(this.get(docId).doc, opts), opts.title);
+  }
+
+  /**
+   * Pages as images. PNG and JPEG give one file per page; TIFF can hold every page in one file.
+   * Annotations are included, as they appear on screen.
+   */
+  async exportImages(
+    docId: number,
+    opts: { format: "png" | "jpeg" | "tiff"; dpi: number; pages: number[]; quality?: number; singleTiff?: boolean },
+  ): Promise<{ page: number; bytes: Uint8Array }[]> {
+    const { doc } = this.get(docId);
+    const scale = opts.dpi / 72;
+    const out: { page: number; bytes: Uint8Array }[] = [];
+    const tiffPages: { width: number; height: number; rgb: Uint8Array; dpi: number }[] = [];
+    for (const index of opts.pages) {
+      const page = this.page(doc, index);
+      const pix = page.toPixmap(mupdf.Matrix.scale(scale, scale), mupdf.ColorSpace.DeviceRGB, false, true);
+      page.destroy();
+      pix.setResolution(opts.dpi, opts.dpi);
+      if (opts.format === "png") out.push({ page: index, bytes: pix.asPNG().slice() });
+      else if (opts.format === "jpeg") out.push({ page: index, bytes: pix.asJPEG(opts.quality ?? 90).slice() });
+      else {
+        const w = pix.getWidth();
+        const h = pix.getHeight();
+        const stride = pix.getStride();
+        const src = pix.getPixels();
+        const rgb = new Uint8Array(w * h * 3);
+        for (let y = 0; y < h; y++) rgb.set(src.subarray(y * stride, y * stride + w * 3), y * w * 3);
+        const p = { width: w, height: h, rgb, dpi: opts.dpi };
+        if (opts.singleTiff) tiffPages.push(p);
+        else out.push({ page: index, bytes: await toTiff([p]) });
+      }
+      pix.destroy();
+    }
+    if (opts.singleTiff && tiffPages.length) out.push({ page: opts.pages[0], bytes: await toTiff(tiffPages) });
+    return out;
+  }
+
+  /** Office documents, web pages, text, e-books and images, laid out and written as one PDF. */
+  convertToPdf(files: { name: string; bytes: Uint8Array }[], opts: { pageSize?: [number, number]; margin?: number; fitImages?: boolean } = {}): Uint8Array {
+    try {
+      return convertToPdf(files, opts);
+    } catch (err) {
+      throw new EngineError(errText(err), "invalid-file");
+    }
+  }
+
+  /** Checks the document against the common PDF/A-2b requirements, without changing it. */
+  checkPdfA(docId: number): PdfAReport {
+    const entry = this.get(docId);
+    const pdf = this.requirePdf(docId);
+    return pdfA(pdf, { fix: false, encrypted: isEncrypted(entry.doc), signed: hasSignatures(pdf) });
+  }
+
+  /** Fixes what can be fixed for PDF/A-2b (one undo step) and reports what's left. */
+  convertToPdfA(docId: number): EditResult & { report: PdfAReport } {
+    const entry = this.get(docId);
+    const pdf = this.requirePdf(docId);
+    if (isEncrypted(entry.doc)) {
+      return { pages: null, report: pdfA(pdf, { fix: false, encrypted: true, signed: hasSignatures(pdf) }) };
+    }
+    const signed = hasSignatures(pdf);
+    const report = this.edit(docId, "Convert to PDF/A", (p) => pdfA(p, { fix: true, encrypted: false, signed }));
+    entry.text.clear();
+    // PDF/A metadata must describe the whole file; an incremental update would leave stale revisions.
+    entry.requireFullSave = true;
+    return { pages: null, report };
   }
 
   properties(docId: number): DocProperties {
@@ -771,6 +1084,45 @@ export class PdfEngine {
       entry.doc.destroy();
       this.docs.delete(docId);
     }
+  }
+
+  private fullSaveOptions(entry: OpenDoc): string {
+    const base = entry.saveOptions ?? "garbage=compact,compress";
+    return entry.pendingSecurity ? `${base},${securityOptions(entry.pendingSecurity)}` : base;
+  }
+
+  private measure(entry: OpenDoc, pdf: mupdf.PDFDocument): number {
+    const dirty = entry.dirtyOutsideJournal || entry.requireFullSave || entry.saveOptions || entry.pendingSecurity;
+    if (!dirty && safe(() => pdf.getJournal().position, 0) === entry.savedPosition) return entry.bytes.length;
+    return safe(() => this.write(entry, pdf, this.fullSaveOptions(entry)).length, entry.bytes.length);
+  }
+
+  /**
+   * A full save. Some options (object streams, cleaning) change the document they write, which
+   * would add an undo step, so those go through a temporary copy.
+   */
+  private write(entry: OpenDoc, pdf: mupdf.PDFDocument, options: string): Uint8Array {
+    if (!/(^|,)(objstms|clean)(,|$)/.test(options)) return pdf.saveToBuffer(options).asUint8Array().slice();
+    const copy = mupdf.Document.openDocument(pdf.saveToBuffer("").asUint8Array().slice(), "application/pdf");
+    try {
+      if (entry.password) copy.authenticatePassword(entry.password);
+      return copy.asPDF()!.saveToBuffer(options).asUint8Array().slice();
+    } finally {
+      copy.destroy();
+    }
+  }
+
+  /** Swaps in a freshly loaded copy of the document (journal restarts). */
+  private replaceDoc(entry: OpenDoc, bytes: Uint8Array, password?: string) {
+    const fresh = mupdf.Document.openDocument(bytes, "application/pdf");
+    entry.hasOpenPassword = fresh.needsPassword();
+    if (password) fresh.authenticatePassword(password);
+    safe(() => fresh.asPDF()?.enableJournal(), undefined);
+    entry.doc.destroy();
+    entry.doc = fresh;
+    entry.bytes = bytes.slice();
+    entry.text.clear();
+    entry.savedPosition = 0;
   }
 
   private pixmap({ docId, pageIndex, scale, rotation, region }: RenderRequest): mupdf.Pixmap {
@@ -943,6 +1295,11 @@ function openPdf(bytes: Uint8Array, password?: string): mupdf.PDFDocument {
   const pdf = doc.asPDF();
   if (!pdf) throw new EngineError("That file isn't a PDF.", "invalid-file");
   return pdf;
+}
+
+function isEncrypted(doc: mupdf.Document): boolean {
+  const e = doc.getMetaData("encryption");
+  return !!e && e !== "None";
 }
 
 function errText(err: unknown): string {

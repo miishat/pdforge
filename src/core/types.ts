@@ -21,6 +21,8 @@ export interface DocInfo {
   /** Page labels, e.g. "iv" or "A-3"; null when the document defines none. */
   labels: string[] | null;
   permissions: Record<Permission, boolean>;
+  /** MuPDF had to rebuild the file's structure to read it (it was damaged). */
+  repaired: boolean;
 }
 
 export type Permission = "print" | "copy" | "edit" | "annotate" | "form" | "accessibility" | "assemble" | "print-hq";

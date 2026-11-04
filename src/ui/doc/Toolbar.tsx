@@ -69,6 +69,7 @@ interface Props {
   onExportComments: () => void;
   onImportComments: () => void;
   onFlatten: () => void;
+  onExport: () => void;
 }
 
 export function Toolbar(p: Props) {
@@ -147,6 +148,7 @@ export function Toolbar(p: Props) {
             { label: "Export comments…", icon: <ArrowExport20Regular />, onSelect: p.onExportComments },
             { label: "Import comments…", icon: <ArrowImport20Regular />, onSelect: p.onImportComments },
             { label: "Flatten…", icon: <LayerDiagonal20Regular />, onSelect: p.onFlatten },
+            { label: "Export as…", icon: <ArrowExport20Regular />, onSelect: p.onExport },
             { kind: "separator" },
             { label: "Print…", icon: <Print20Regular />, shortcut: "Ctrl+P", onSelect: p.onPrint },
             { label: "Document properties", icon: <Info20Regular />, shortcut: "Ctrl+D", onSelect: p.onProperties },

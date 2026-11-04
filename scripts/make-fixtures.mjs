@@ -188,4 +188,44 @@ writeFileSync(new URL("features.pdf", out), rich.saveToBuffer("compress").asUint
   writeFileSync(new URL("test-signer.p12", out), Buffer.from(forge.asn1.toDer(p12).getBytes(), "binary"));
 }
 
+// Phase 4: a scan (image-only page) for OCR, a photo-heavy file for compression, and a damaged file.
+{
+  const src = mupdf.Document.openDocument(new URL("sample.pdf", out).pathname, "application/pdf");
+  const page = src.loadPage(0);
+  const s = 200 / 72;
+  const pix = page.toPixmap(mupdf.Matrix.scale(s, s), mupdf.ColorSpace.DeviceGray, false, false);
+  const doc = new mupdf.PDFDocument();
+  const res = doc.addObject({ XObject: { Scan: doc.addImage(new mupdf.Image(pix)) } });
+  doc.insertPage(-1, doc.addPage([0, 0, 612, 792], 0, res, "q 612 0 0 792 0 0 cm /Scan Do Q"));
+  writeFileSync(new URL("scanned.pdf", out), doc.saveToBuffer("compress").asUint8Array());
+}
+{
+  const w = 1000;
+  const h = 750;
+  const pix = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, w, h], false);
+  const px = pix.getPixels();
+  const stride = pix.getStride();
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * stride + x * 3;
+      px[i] = (x * 255) / w;
+      px[i + 1] = (y * 255) / h;
+      px[i + 2] = 128 + 100 * Math.sin(x / 40) * Math.cos(y / 30);
+    }
+  }
+  const doc = makeDoc([{ size: letter, lines: ["Photo report", "A large photo drawn small."] }]);
+  const page = doc.findPage(0);
+  page.get("Resources").put("XObject", { Photo: doc.addImage(new mupdf.Image(pix)) });
+  const extra = doc.addStream("q 288 0 0 216 72 420 cm /Photo Do Q", {});
+  const contents = doc.newArray();
+  contents.push(page.get("Contents"));
+  contents.push(extra);
+  page.put("Contents", contents);
+  writeFileSync(new URL("photo.pdf", out), doc.saveToBuffer("compress").asUint8Array());
+}
+{
+  const good = Buffer.from(sample.saveToBuffer("compress").asUint8Array()).toString("latin1");
+  writeFileSync(new URL("damaged.pdf", out), Buffer.from(good.replace(/startxref\s+\d+/, "startxref\n12345"), "latin1"));
+}
+
 console.log("fixtures written");

@@ -8,7 +8,7 @@ import { resolvePages, usePages, type PagesValue } from "./OrganizeDialogs";
 import { parsePageRange } from "./pageRange";
 import { hexToColor, PALETTE } from "./tools";
 
-function Pages({ count, selected, value, onChange }: { count: number; selected: number[]; value: PagesValue; onChange: (v: PagesValue) => void }) {
+export function Pages({ count, selected, value, onChange }: { count: number; selected: number[]; value: PagesValue; onChange: (v: PagesValue) => void }) {
   const err = value.kind === "range" && value.text ? parsePageRange(value.text, count) : null;
   return (
     <div className="row-gap">

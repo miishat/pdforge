@@ -30,6 +30,9 @@ import {
   type HeaderFooterPreset,
 } from "./EditDialogs";
 import { EditBar, OrganizeBar } from "./ModeBar";
+import { ProtectBar, type ProtectDialog } from "./protect/ProtectBar";
+import { ProtectDialogs, type ProtectContext } from "./protect/ProtectDialogs";
+import type { SecurityState } from "../../core/engine";
 import { CombineDialog, CropDialog, ExtractDialog, InsertPagesDialog, PageSizeDialog, ReplaceDialog, SplitDialog } from "./OrganizeDialogs";
 import { OrganizeView } from "./OrganizeView";
 import type { SplitPlan } from "../../core/pages";
@@ -137,6 +140,9 @@ export function DocumentView(props: DocumentViewProps) {
   const [attachments, setAttachments] = useState<AttachmentInfo[]>([]);
   const [layers, setLayers] = useState<LayerInfo[]>([]);
   const [dialog, setDialog] = useState<DialogState>(null);
+  const [protectDialog, setProtectDialog] = useState<ProtectDialog | null>(null);
+  const [security, setSecurity] = useState<SecurityState | null>(null);
+  const [repairedNotice, setRepairedNotice] = useState(info.repaired);
   const [presenting, setPresenting] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[] } | null>(null);
   const [status, setStatus] = useState("");
@@ -218,10 +224,10 @@ export function DocumentView(props: DocumentViewProps) {
   const search = useSearch(info.docId, info.pageCount, useCallback(() => currentRef.current, []));
   const readAloud = useReadAloud(data, info.pageCount, useCallback((p: number) => canvas.current?.scrollTo({ page: p }), []));
 
-  // Status messages fade out on their own.
+  // Status messages fade out on their own, after enough time to read them.
   useEffect(() => {
     if (!status) return;
-    const t = setTimeout(() => setStatus(""), 2400);
+    const t = setTimeout(() => setStatus(""), Math.min(9000, Math.max(2400, status.length * 60)));
     return () => clearTimeout(t);
   }, [status]);
 
@@ -831,6 +837,7 @@ export function DocumentView(props: DocumentViewProps) {
       if (ctrl && e.shiftKey && (k === "3" || k === "#")) return run(() => setMode("fill"));
       if (ctrl && e.shiftKey && (k === "4" || k === "$")) return run(() => setMode("organize"));
       if (ctrl && e.shiftKey && (k === "5" || k === "%")) return run(() => setMode("edit"));
+      if (ctrl && e.shiftKey && (k === "6" || k === "^")) return run(() => setMode("protect"));
       if (!typing() && mode === "organize") {
         if ((e.key === "Delete" || e.key === "Backspace") && orgSelected.size && orgSelected.size < info.pageCount)
           return run(() => void pageOp(() => engine().call("deletePages", info.docId, [...orgSelected]), () => setOrgSelected(new Set())));
@@ -1031,6 +1038,26 @@ export function DocumentView(props: DocumentViewProps) {
 
   const sigSummary = sigs ? signatureSummary(sigs, trusted) : null;
   const deleteSelected = selected && mode !== "read" ? () => void remove(selected.page, selected.id) : null;
+  const refreshSecurity = useCallback(async () => {
+    setSecurity(await engine().call("security", info.docId).catch(() => null));
+  }, [info.docId]);
+  useEffect(() => {
+    if (mode === "protect") void refreshSecurity();
+  }, [mode, editor.state, refreshSecurity]);
+  const protectCtx: ProtectContext = {
+    info,
+    name: props.name,
+    currentPage,
+    signed: !!sigs?.length,
+    run: editor.run,
+    undo: editor.undo,
+    refresh: async () => {
+      await editor.refresh();
+      await refreshSecurity();
+    },
+    setStatus,
+  };
+
   const barCommon = {
     tool,
     onTool: chooseTool,
@@ -1083,6 +1110,7 @@ export function DocumentView(props: DocumentViewProps) {
         onExportComments={() => void exportComments()}
         onImportComments={() => void importComments()}
         onFlatten={() => setDialog({ kind: "flatten" })}
+        onExport={() => setProtectDialog({ kind: "export", format: "docx" })}
       />
       {mode === "comment" && (
         <CommentBar
@@ -1175,6 +1203,25 @@ export function DocumentView(props: DocumentViewProps) {
           onApplyRedactions={() => setDialog({ kind: "applyRedactions" })}
           onSanitize={() => setDialog({ kind: "sanitize" })}
         />
+      )}
+      {mode === "protect" && (
+        <ProtectBar
+          security={security}
+          canUndo={editor.state.canUndo}
+          canRedo={editor.state.canRedo}
+          undoLabel={editor.state.undoLabel}
+          redoLabel={editor.state.redoLabel}
+          onUndo={() => void editor.undo()}
+          onRedo={() => void editor.redo()}
+          onOpen={setProtectDialog}
+        />
+      )}
+      {repairedNotice && (
+        <div className="infobar" role="status">
+          This file was damaged. PDForge repaired it while opening; save to keep the repaired version.
+          <button className="link-button" onClick={() => (setRepairedNotice(false), setProtectDialog({ kind: "repair" }))}>Details</button>
+          <button className="link-button" onClick={() => setRepairedNotice(false)}>Dismiss</button>
+        </div>
       )}
       {mode === "edit" && redactCount > 0 && (
         <div className="infobar infobar--bad" role="status">
@@ -1552,6 +1599,7 @@ export function DocumentView(props: DocumentViewProps) {
           }}
         />
       )}
+      {protectDialog && <ProtectDialogs dialog={protectDialog} ctx={protectCtx} onClose={() => setProtectDialog(null)} />}
       {presenting && (
         <Presentation
           info={info}

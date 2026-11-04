@@ -1,4 +1,4 @@
-import { Dismiss16Regular, FolderOpen20Regular } from "@fluentui/react-icons";
+import { DocumentAdd20Regular, Dismiss16Regular, FolderOpen20Regular } from "@fluentui/react-icons";
 import { Mark } from "./Mark";
 import type { RecoveryMeta } from "../platform";
 import { timeAgo, type RecentFile } from "./recent";
@@ -7,6 +7,8 @@ interface Props {
   recent: RecentFile[];
   missing: Set<string>;
   onOpen: () => void;
+  /** Make a PDF from Word, Excel, PowerPoint, web pages, text or images. */
+  onCreate: () => void;
   onOpenRecent: (r: RecentFile) => void;
   onRemoveRecent: (r: RecentFile) => void;
   recoveries: { key: string; meta: RecoveryMeta }[];
@@ -14,7 +16,7 @@ interface Props {
   onDiscardRecovery: (r: { key: string; meta: RecoveryMeta }) => void;
 }
 
-export function StartScreen({ recent, missing, onOpen, onOpenRecent, onRemoveRecent, recoveries, onRecover, onDiscardRecovery }: Props) {
+export function StartScreen({ recent, missing, onOpen, onCreate, onOpenRecent, onRemoveRecent, recoveries, onRecover, onDiscardRecovery }: Props) {
   return (
     <main className="start">
       <div className={`start__inner ${recent.length || recoveries.length ? "start__inner--with-recent" : ""}`}>
@@ -28,7 +30,11 @@ export function StartScreen({ recent, missing, onOpen, onOpenRecent, onRemoveRec
             Open a PDF
             <kbd>Ctrl+O</kbd>
           </button>
-          <p className="start__hint">Or drag files into this window.</p>
+          <button className="button button--large" onClick={onCreate} title="From Word, Excel, PowerPoint, web pages, text or images">
+            <DocumentAdd20Regular />
+            Create a PDF from files
+          </button>
+          <p className="start__hint">Or drag files here. Word, Excel, PowerPoint, web pages and images become PDFs.</p>
         </div>
         {recoveries.length > 0 && (
           <section className="recovery" aria-labelledby="recovery-title">

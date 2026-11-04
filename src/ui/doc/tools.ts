@@ -2,7 +2,7 @@
 import type { Color } from "../../core/types";
 import { load, save } from "../settings";
 
-export type Mode = "read" | "comment" | "fill" | "organize" | "edit";
+export type Mode = "read" | "comment" | "fill" | "organize" | "edit" | "protect";
 
 export type AnnotTool =
   | "highlight" | "underline" | "strikeout" | "squiggly"

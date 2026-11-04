@@ -12,7 +12,7 @@ async function openFile(page: Page, name: string) {
 test("start screen offers to open a file", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("button", { name: /Open a PDF/ })).toBeVisible();
-  await expect(page.getByText("Or drag files into this window.")).toBeVisible();
+  await expect(page.getByText(/^Or drag files here\./)).toBeVisible();
 });
 
 test("opens a PDF and renders the first page", async ({ page }) => {
