@@ -1,4 +1,4 @@
-import { Archive20Regular, ArrowExport20Regular, ArrowMinimize20Regular, LockClosed20Regular, ScanText20Regular, Wrench20Regular } from "@fluentui/react-icons";
+import { Accessibility20Regular, Archive20Regular, ArrowExport20Regular, ArrowMinimize20Regular, LockClosed20Regular, ScanText20Regular, Wrench20Regular } from "@fluentui/react-icons";
 import type { SecurityState } from "../../../core/engine";
 import { MenuButton } from "../../components/Menu";
 import { Divider, UndoRedo } from "../ModeBar";
@@ -22,6 +22,8 @@ export function ProtectBar(p: {
   onUndo: () => void;
   onRedo: () => void;
   onOpen: (d: ProtectDialog) => void;
+  onTables: () => void;
+  onA11y: () => void;
 }) {
   const s = p.security;
   const status = !s ? "" : s.pending === "encrypt" ? "Protected when you save" : s.pending === "decrypt" ? "Unprotected when you save" : s.encrypted ? `Protected · ${s.method}` : "Not protected";
@@ -58,6 +60,7 @@ export function ProtectBar(p: {
             { label: "Plain text (.txt)…", onSelect: () => p.onOpen({ kind: "export", format: "text" }) },
             { kind: "separator" },
             { label: "Images (PNG, JPEG, TIFF)…", onSelect: () => p.onOpen({ kind: "export", format: "images" }) },
+            { label: "Tables (Excel, CSV)…", onSelect: p.onTables },
           ]}
         />
       </div>
@@ -68,6 +71,9 @@ export function ProtectBar(p: {
         </button>
         <button className="text-button" onClick={() => p.onOpen({ kind: "repair" })} title="Check the file's structure and rebuild it">
           <Wrench20Regular /> Repair
+        </button>
+        <button className="text-button" onClick={p.onA11y} title="Check how well screen readers can use this document">
+          <Accessibility20Regular /> Accessibility
         </button>
       </div>
       <span className="spacer" />

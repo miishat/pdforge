@@ -27,6 +27,11 @@ import {
   ArrowImport20Regular,
   LayerDiagonal20Regular,
   HandLeft20Regular,
+  Table20Regular,
+  DocumentSearch20Regular,
+  SplitVertical20Regular,
+  Keyboard20Regular,
+  Sparkle20Regular,
 } from "@fluentui/react-icons";
 import { ModeSwitch } from "./ModeBar";
 import type { Mode } from "./tools";
@@ -70,6 +75,7 @@ interface Props {
   onImportComments: () => void;
   onFlatten: () => void;
   onExport: () => void;
+  onCommand: (id: string) => void;
 }
 
 export function Toolbar(p: Props) {
@@ -149,6 +155,15 @@ export function Toolbar(p: Props) {
             { label: "Import comments…", icon: <ArrowImport20Regular />, onSelect: p.onImportComments },
             { label: "Flatten…", icon: <LayerDiagonal20Regular />, onSelect: p.onFlatten },
             { label: "Export as…", icon: <ArrowExport20Regular />, onSelect: p.onExport },
+            { label: "Extract tables…", icon: <Table20Regular />, onSelect: () => p.onCommand("edit.tables") },
+            { kind: "separator" },
+            { label: "Compare with another PDF…", icon: <DocumentSearch20Regular />, onSelect: () => p.onCommand("file.compare") },
+            { label: "Split view", icon: <SplitVertical20Regular />, shortcut: "Ctrl+\\", onSelect: () => p.onCommand("window.split") },
+            { label: "Batch actions…", icon: <DocumentMultiple20Regular />, onSelect: () => p.onCommand("file.batch") },
+            { kind: "separator" },
+            { label: "Assistant", icon: <Sparkle20Regular />, onSelect: () => p.onCommand("window.assistant") },
+            { label: "Command palette", icon: <Search20Regular />, shortcut: "Ctrl+K", onSelect: () => p.onCommand("window.palette") },
+            { label: "Keyboard shortcuts…", icon: <Keyboard20Regular />, onSelect: () => p.onCommand("window.shortcuts") },
             { kind: "separator" },
             { label: "Print…", icon: <Print20Regular />, shortcut: "Ctrl+P", onSelect: p.onPrint },
             { label: "Document properties", icon: <Info20Regular />, shortcut: "Ctrl+D", onSelect: p.onProperties },

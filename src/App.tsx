@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { engine } from "./core/client";
 import type { DocInfo } from "./core/types";
 import {
@@ -6,7 +6,12 @@ import {
   recoveryRead, setWindowTitle, type PickedFile, type RecoveryMeta,
 } from "./platform";
 import { UnsavedDialog } from "./ui/doc/Dialogs";
-import { DocumentView } from "./ui/doc/DocumentView";
+import { DocumentView, type DocCommands, type ViewHandle } from "./ui/doc/DocumentView";
+import { COMMAND_BY_ID, comboOf, effectiveKeymap, loadOverrides, loadVim, reverseKeymap, saveOverrides, saveVim, type Keymap } from "./ui/commands";
+import { CommandPalette } from "./ui/CommandPalette";
+import { ShortcutsDialog } from "./ui/ShortcutsDialog";
+import { CompareView, type CompareSide } from "./ui/compare/CompareView";
+import { BatchDialog } from "./ui/batch/BatchDialog";
 import { ErrorPanel } from "./ui/ErrorPanel";
 import { PasswordPrompt } from "./ui/PasswordPrompt";
 import { addRecent, loadRecent, removeRecent, samePath, saveRecent, updateRecent, type RecentFile } from "./ui/recent";
@@ -146,27 +151,122 @@ export function App() {
     if (tab.path) setRecent((list) => updateRecent(list, tab.path!, { page }));
   }, []);
 
-  // App-wide shortcuts.
+  // ---- Commands: palette, shortcuts (rebindable), vim keys ----
+  const [overrides, setOverrides] = useState<Keymap>(loadOverrides);
+  const [vim, setVim] = useState(loadVim);
+  const [palette, setPalette] = useState(false);
+  const [shortcuts, setShortcuts] = useState(false);
+  const [batch, setBatch] = useState(false);
+  const [compare, setCompare] = useState<{ a: CompareSide } | null>(null);
+  const keymap = useMemo(() => effectiveKeymap(overrides), [overrides]);
+  const docCommands = useRef<DocCommands | null>(null);
+  const registerCommands = useCallback((c: DocCommands | null, previous?: DocCommands) => {
+    if (c) docCommands.current = c;
+    else if (docCommands.current === previous) docCommands.current = null;
+  }, []);
+
+  // ---- Split view ----
+  const [split, setSplit] = useState<{ left: number; right: number } | null>(null);
+  const [syncScroll, setSyncScroll] = useState(true);
+  const splitPending = useRef<number | null>(null);
+  const readyIds = tabs.filter((t) => t.state.kind === "ready").map((t) => t.id);
+  const splitOn = !!split && readyIds.includes(split.left) && readyIds.includes(split.right) && (activeId === split.left || activeId === split.right);
+  const toggleSplit = useCallback(() => {
+    if (splitOn) return setSplit(null);
+    if (activeId == null) return;
+    const other = [...tabsRef.current].reverse().find((t) => t.id !== activeId && t.state.kind === "ready");
+    if (other) setSplit({ left: activeId, right: other.id });
+    else {
+      // Only one document: pick a second one to show beside it.
+      splitPending.current = activeId;
+      void openDialog();
+    }
+  }, [splitOn, activeId, openDialog]);
   useEffect(() => {
+    const first = splitPending.current;
+    if (first == null || activeId == null || activeId === first) return;
+    if (tabs.find((t) => t.id === activeId)?.state.kind === "ready") {
+      splitPending.current = null;
+      setSplit({ left: first, right: activeId });
+    }
+  }, [activeId, tabs]);
+  const views = useRef(new Map<number, ViewHandle>());
+  // The view we last scrolled to match the other one, and where that left it: a scroll event from it
+  // at that same position is our own echo, anything else is the person scrolling.
+  const echo = useRef<{ id: number; top: number } | null>(null);
+  const onViewScroll = useCallback(
+    (id: number) => {
+      if (!splitOn || !syncScroll || !split) return;
+      const from = views.current.get(id);
+      if (!from) return;
+      if (echo.current?.id === id && Math.abs(from.scrollTop() - echo.current.top) < 2) return;
+      const other = id === split.left ? split.right : id === split.right ? split.left : null;
+      const to = other != null ? views.current.get(other) : undefined;
+      if (!to || other == null) return;
+      to.scrollTo(from.here());
+      echo.current = { id: other, top: to.scrollTop() };
+    },
+    [splitOn, syncScroll, split],
+  );
+
+  const activeTab = tabs.find((t) => t.id === activeId) ?? null;
+  const appCommands: Record<string, (() => void) | undefined> = {
+    "file.open": () => void openDialog(),
+    "file.create": () => void createPdf(),
+    "file.close": activeId != null ? () => void close(activeId) : undefined,
+    "file.batch": () => setBatch(true),
+    "file.compare": activeTab?.state.kind === "ready" ? () => setCompare({ a: { docId: (activeTab.state as { info: DocInfo }).info.docId, name: activeTab.name } }) : undefined,
+    "window.palette": () => setPalette(true),
+    "window.nextTab": tabs.length > 1 ? () => cycle(1) : undefined,
+    "window.prevTab": tabs.length > 1 ? () => cycle(-1) : undefined,
+    "window.split": activeTab?.state.kind === "ready" ? toggleSplit : undefined,
+    "window.syncScroll": splitOn ? () => setSyncScroll((v) => !v) : undefined,
+    "window.shortcuts": () => setShortcuts(true),
+  };
+  const appCommandsRef = useRef(appCommands);
+  appCommandsRef.current = appCommands;
+  const available = useCallback((id: string) => !!appCommandsRef.current[id] || !!docCommands.current?.has(id), []);
+  const runCommand = useCallback((id: string) => {
+    const app = appCommandsRef.current[id];
+    if (app) app();
+    else docCommands.current?.run(id);
+  }, []);
+
+  useEffect(() => {
+    const reverse = reverseKeymap(keymap);
+    const typing = () => /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement as HTMLElement)?.tagName ?? "") || !!(document.activeElement as HTMLElement)?.isContentEditable;
+    let lastG = 0;
+    const VIM: Record<string, string> = { j: "vim.down", k: "vim.up", d: "vim.halfDown", u: "vim.halfUp", h: "vim.prevPage", l: "vim.nextPage", G: "vim.last", "/": "vim.find", n: "vim.next", N: "vim.prev" };
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      const k = e.key.toLowerCase();
-      if (k === "o") {
-        e.preventDefault();
-        void openDialog();
-      } else if (k === "w" || k === "f4") {
-        if (activeId != null) {
+      if (e.defaultPrevented || document.querySelector("dialog[open]")) return;
+      const doc = docCommands.current;
+      if (vim && doc && !typing() && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.key === "g") {
           e.preventDefault();
-          close(activeId);
+          if (Date.now() - lastG < 700) {
+            lastG = 0;
+            doc.run("vim.first");
+          } else lastG = Date.now();
+          return;
         }
-      } else if (e.key === "Tab") {
-        e.preventDefault();
-        cycle(e.shiftKey ? -1 : 1);
+        const v = VIM[e.key];
+        if (v) {
+          e.preventDefault();
+          doc.run(v);
+          return;
+        }
       }
+      const combo = comboOf(e);
+      const id = combo && reverse.get(combo);
+      if (!id) return;
+      if (typing() && !COMMAND_BY_ID.get(id)?.inInput) return;
+      if (!available(id)) return;
+      e.preventDefault();
+      runCommand(id);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openDialog, close, cycle, activeId]);
+  }, [keymap, vim, available, runCommand]);
 
   // Drag and drop: Tauri hands us file paths; the browser hands us File objects.
   useEffect(() => {
@@ -244,8 +344,16 @@ export function App() {
           onRemoveRecent={(r) => setRecent((l) => removeRecent(l, r.path))}
         />
       )}
+      <div className={`workspace ${splitOn ? "workspace--split" : ""}`}>
+      {splitOn && (
+        <div className="split-bar" role="toolbar" aria-label="Split view">
+          <label className="check"><input type="checkbox" checked={syncScroll} onChange={(e) => setSyncScroll(e.target.checked)} /> Scroll together</label>
+          <button className="link-button" onClick={() => setSplit(null)}>Close split view</button>
+        </div>
+      )}
       {tabs.map((t) => {
         const isActive = t.id === activeId;
+        const inSplit = splitOn && split && (t.id === split.left || t.id === split.right);
         switch (t.state.kind) {
           case "loading":
             return (
@@ -273,6 +381,16 @@ export function App() {
             return (
               <DocumentView
                 key={t.id}
+                visible={!!inSplit}
+                splitSide={inSplit ? (t.id === split!.left ? "left" : "right") : undefined}
+                onFocusView={inSplit && !isActive ? () => setActiveId(t.id) : undefined}
+                registerCommands={registerCommands}
+                onCommand={runCommand}
+                registerView={(h) => {
+                  if (h) views.current.set(t.id, h);
+                  else views.current.delete(t.id);
+                }}
+                onViewScroll={() => onViewScroll(t.id)}
                 info={t.state.info}
                 name={t.name}
                 path={t.path}
@@ -298,6 +416,31 @@ export function App() {
             );
         }
       })}
+      </div>
+      {palette && <CommandPalette available={available} keymap={keymap} onRun={runCommand} onClose={() => setPalette(false)} />}
+      {shortcuts && (
+        <ShortcutsDialog
+          overrides={overrides}
+          vim={vim}
+          onChange={(o) => {
+            setOverrides(o);
+            saveOverrides(o);
+          }}
+          onVim={(on) => {
+            setVim(on);
+            saveVim(on);
+          }}
+          onClose={() => setShortcuts(false)}
+        />
+      )}
+      {compare && (
+        <CompareView
+          a={compare.a}
+          others={tabs.filter((t) => t.state.kind === "ready" && t.id !== activeId).map((t) => ({ docId: (t.state as { info: DocInfo }).info.docId, name: t.name }))}
+          onClose={() => setCompare(null)}
+        />
+      )}
+      {batch && <BatchDialog onClose={() => setBatch(false)} />}
       {prompt && (
         <UnsavedDialog
           names={prompt.ids.map((id) => tabsRef.current.find((t) => t.id === id)?.name ?? "Document")}

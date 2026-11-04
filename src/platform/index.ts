@@ -256,3 +256,59 @@ export async function copyPng(bytes: Uint8Array): Promise<void> {
 export function baseName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
+
+/**
+ * Picks a folder and lists its files with these extensions (desktop), or picks several files
+ * (browser, where folders can't be read). Returns paths to read later on the desktop.
+ */
+export async function pickFolderFiles(extensions: string[], recursive: boolean): Promise<{ folder: string | null; files: PickedFileRef[] } | null> {
+  if (isDesktop) {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const dir = await open({ directory: true, multiple: false, title: "Choose a folder of files" });
+    if (typeof dir !== "string") return null;
+    const { invoke } = await import("@tauri-apps/api/core");
+    const paths = await invoke<string[]>("list_files", { dir, extensions, recursive });
+    return { folder: dir, files: paths.map((p) => ({ name: baseName(p), path: p, read: () => readPath(p).then((f) => f.bytes) })) };
+  }
+  const files = await pickFiles({ name: "Files", extensions });
+  return { folder: null, files: files.map((f) => ({ name: f.name, path: null, read: async () => f.bytes })) };
+}
+
+/** A file chosen for later reading (batch inputs are read one at a time to save memory). */
+export interface PickedFileRef {
+  name: string;
+  path: string | null;
+  read: () => Promise<Uint8Array>;
+}
+
+/** Picks files (desktop: paths, read later). */
+export async function pickFileRefs(extensions: string[]): Promise<PickedFileRef[]> {
+  if (isDesktop) {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const paths = await open({ multiple: true, filters: [{ name: "Files", extensions }] });
+    if (!paths) return [];
+    return (Array.isArray(paths) ? paths : [paths]).map((p) => ({ name: baseName(p), path: p, read: () => readPath(p).then((f) => f.bytes) }));
+  }
+  const files = await pickFiles({ name: "Files", extensions });
+  return files.map((f) => ({ name: f.name, path: null, read: async () => f.bytes }));
+}
+
+/** Picks an output folder (desktop). In the browser there is none: results download. */
+export async function pickOutputFolder(): Promise<string | null> {
+  if (!isDesktop) return null;
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const dir = await open({ directory: true, multiple: false, title: "Choose where to save the results" });
+  return typeof dir === "string" ? dir : null;
+}
+
+/** Writes a file into a folder (desktop) or downloads it (browser). */
+export async function writeInto(folder: string | null, name: string, bytes: Uint8Array): Promise<string> {
+  if (isDesktop && folder) {
+    const sep = folder.includes("\\") ? "\\" : "/";
+    const path = `${folder.replace(/[\\/]$/, "")}${sep}${name}`;
+    await writePath(path, bytes);
+    return path;
+  }
+  await saveBytes(name, bytes);
+  return name;
+}

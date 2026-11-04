@@ -31,6 +31,8 @@ import {
 } from "./EditDialogs";
 import { EditBar, OrganizeBar } from "./ModeBar";
 import { ProtectBar, type ProtectDialog } from "./protect/ProtectBar";
+import { A11yDialog, TablesDialog } from "./InsightDialogs";
+import { AssistantPanel } from "../ai/AssistantPanel";
 import { ProtectDialogs, type ProtectContext } from "./protect/ProtectDialogs";
 import type { SecurityState } from "../../core/engine";
 import { CombineDialog, CropDialog, ExtractDialog, InsertPagesDialog, PageSizeDialog, ReplaceDialog, SplitDialog } from "./OrganizeDialogs";
@@ -53,7 +55,32 @@ import { Toolbar } from "./Toolbar";
 import { speechAvailable, useReadAloud } from "./useReadAloud";
 import { useSearch } from "./useSearch";
 
+/** Lets the app read and set where a view is scrolled to (split view's synced scrolling). */
+export interface ViewHandle {
+  here(): Dest;
+  scrollTo(dest: Dest): void;
+  scrollTop(): number;
+}
+
+/** What a document view offers the app's command dispatcher (palette and shortcuts). */
+export interface DocCommands {
+  has(id: string): boolean;
+  run(id: string): void;
+}
+
 export interface DocumentViewProps {
+  /** Called with this view's commands while it is the active view, and null when it stops being. */
+  registerCommands?: (c: DocCommands | null, previous?: DocCommands) => void;
+  /** Shown but not focused (the other half of a split view). */
+  visible?: boolean;
+  /** Runs an app-level command (palette, split view, compare, batch…). */
+  onCommand?: (id: string) => void;
+  /** A click in this view when it's visible but not active (split view). */
+  onFocusView?: () => void;
+  splitSide?: "left" | "right";
+  /** For synchronised scrolling in split view. */
+  registerView?: (h: ViewHandle | null) => void;
+  onViewScroll?: () => void;
   info: DocInfo;
   name: string;
   path: string | null;
@@ -98,6 +125,8 @@ type DialogState =
   | { kind: "findRedact" }
   | { kind: "applyRedactions" }
   | { kind: "sanitize" }
+  | { kind: "tables" }
+  | { kind: "a11y" }
   | null;
 
 interface Sel {
@@ -141,6 +170,7 @@ export function DocumentView(props: DocumentViewProps) {
   const [layers, setLayers] = useState<LayerInfo[]>([]);
   const [dialog, setDialog] = useState<DialogState>(null);
   const [protectDialog, setProtectDialog] = useState<ProtectDialog | null>(null);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [security, setSecurity] = useState<SecurityState | null>(null);
   const [repairedNotice, setRepairedNotice] = useState(info.repaired);
   const [presenting, setPresenting] = useState(false);
@@ -824,24 +854,14 @@ export function DocumentView(props: DocumentViewProps) {
     const onKey = (e: KeyboardEvent) => {
       if (document.querySelector("dialog[open]")) return;
       const ctrl = e.ctrlKey || e.metaKey;
-      const k = e.key.toLowerCase();
       const run = (fn: () => void) => {
         e.preventDefault();
         fn();
       };
-      if (ctrl && !typing() && k === "z" && !e.shiftKey) return run(() => void editor.undo());
-      if (ctrl && !typing() && (k === "y" || (k === "z" && e.shiftKey))) return run(() => void editor.redo());
-      if (ctrl && k === "s") return run(() => void doSave(e.shiftKey));
-      if (ctrl && e.shiftKey && (k === "1" || k === "!")) return run(() => setMode("read"));
-      if (ctrl && e.shiftKey && (k === "2" || k === "@")) return run(() => setMode("comment"));
-      if (ctrl && e.shiftKey && (k === "3" || k === "#")) return run(() => setMode("fill"));
-      if (ctrl && e.shiftKey && (k === "4" || k === "$")) return run(() => setMode("organize"));
-      if (ctrl && e.shiftKey && (k === "5" || k === "%")) return run(() => setMode("edit"));
-      if (ctrl && e.shiftKey && (k === "6" || k === "^")) return run(() => setMode("protect"));
+      if (e.defaultPrevented) return;
       if (!typing() && mode === "organize") {
         if ((e.key === "Delete" || e.key === "Backspace") && orgSelected.size && orgSelected.size < info.pageCount)
           return run(() => void pageOp(() => engine().call("deletePages", info.docId, [...orgSelected]), () => setOrgSelected(new Set())));
-        if (ctrl && k === "a") return run(() => setOrgSelected(new Set(info.pages.map((_, i) => i))));
       }
       if (!typing() && mode === "edit" && (editImage || editLink) && (e.key === "Delete" || e.key === "Backspace")) return run(() => void deleteSelectedEditItem());
       if (!typing() && selected && (e.key === "Delete" || e.key === "Backspace") && mode !== "read") return run(() => void remove(selected.page, selected.id));
@@ -858,39 +878,11 @@ export function DocumentView(props: DocumentViewProps) {
           if (tool === "place" || tool === "signbox") setTool("select");
         });
       }
-      if (ctrl && e.shiftKey && (k === "+" || k === "=")) return run(() => doRotate(90));
-      if (ctrl && e.shiftKey && (k === "-" || k === "_")) return run(() => doRotate(-90));
-      if (ctrl && e.shiftKey && k === "y") return run(startReadAloud);
-      if (ctrl && !e.shiftKey && !e.altKey) {
-        if (k === "=" || k === "+") return run(() => zoomStep(1));
-        if (k === "-") return run(() => zoomStep(-1));
-        if (k === "0") return run(() => setZoomMode({ kind: "fit-page" }));
-        if (k === "1") return run(() => setZoomMode({ kind: "custom", zoom: 1 }));
-        if (k === "2") return run(() => setZoomMode({ kind: "fit-width" }));
-        if (k === "f") return run(() => openSearch());
-        if (k === "p") return run(() => setDialog({ kind: "print" }));
-        if (k === "d") return run(() => setDialog({ kind: "properties" }));
-        if (k === "l") return run(() => setPresenting(true));
-        if (k === "g") return run(() => document.querySelector<HTMLInputElement>(".doc-view:not([hidden]) .page-input input")?.focus());
-        if (k === "c" && !typing() && selection && !isEmpty(selection)) return run(copySelection);
-        if (k === "a" && !typing()) return run(selectAll);
-      }
-      if (e.key === "F3") return run(() => (search.state.hits.length ? search.step(e.shiftKey ? -1 : 1) : openSearch()));
-      if (e.key === "F4") return run(toggleSidebar);
-      if (e.key === "F5") return run(() => setPresenting(true));
-      if (e.altKey && e.key === "ArrowLeft") return run(() => goHistory("back"));
-      if (e.altKey && e.key === "ArrowRight") return run(() => goHistory("forward"));
       if (typing() || ctrl || e.altKey) return;
       if (e.key === "Escape") {
         if (tool !== "select") return run(() => setTool("select"));
         if (selection) return run(() => setSelection(null));
       }
-      if (k === "v") return run(() => setTool("select"));
-      if (k === "h") return run(() => setTool("hand"));
-      if (k === "z") return run(() => setTool("marquee"));
-      if (k === "g") return run(() => setTool("snapshot"));
-      if (e.key === "Home") return run(() => goPage(0));
-      if (e.key === "End") return run(() => goPage(info.pageCount - 1));
       if (e.key === "ArrowRight" && zoomMode.kind === "fit-page") return run(() => goPage(currentRef.current + 1));
       if (e.key === "ArrowLeft" && zoomMode.kind === "fit-page") return run(() => goPage(currentRef.current - 1));
     };
@@ -931,6 +923,103 @@ export function DocumentView(props: DocumentViewProps) {
     },
     [selection, copySelection, info.permissions.copy, openSearch, data, selectAll, tool, doRotate, applyMarkup],
   );
+
+  // Commands for the palette and the app's shortcut dispatcher. Missing entries are unavailable
+  // right now (so the key falls through, e.g. Ctrl+C with nothing selected).
+  const commandsRef = useRef<Record<string, (() => void) | undefined>>({});
+  const scroller = () => canvas.current?.element();
+  const scrollBy = (dy: number) => scroller()?.scrollBy({ top: dy });
+  const openProtect = (d: ProtectDialog) => {
+    setMode("protect");
+    setProtectDialog(d);
+  };
+  commandsRef.current = {
+    "file.save": () => void doSave(false),
+    "file.saveAs": () => void doSave(true),
+    "file.print": () => setDialog({ kind: "print" }),
+    "file.properties": () => setDialog({ kind: "properties" }),
+    "file.export": () => setProtectDialog({ kind: "export", format: "docx" }),
+    "file.exportComments": () => void exportComments(),
+    "file.importComments": () => void importComments(),
+    "edit.flatten": () => setDialog({ kind: "flatten" }),
+    "edit.tables": () => setDialog({ kind: "tables" }),
+    "edit.undo": editor.state.canUndo ? () => void editor.undo() : undefined,
+    "edit.redo": editor.state.canRedo ? () => void editor.redo() : undefined,
+    "edit.copy": selection && !isEmpty(selection) ? () => void copySelection() : undefined,
+    "edit.selectAll": mode === "organize" ? () => setOrgSelected(new Set(info.pages.map((_, i) => i))) : () => void selectAll(),
+    "view.zoomIn": () => zoomStep(1),
+    "view.zoomOut": () => zoomStep(-1),
+    "view.fitPage": () => setZoomMode({ kind: "fit-page" }),
+    "view.actualSize": () => setZoomMode({ kind: "custom", zoom: 1 }),
+    "view.fitWidth": () => setZoomMode({ kind: "fit-width" }),
+    "view.rotateCw": () => doRotate(90),
+    "view.rotateCcw": () => doRotate(-90),
+    "view.sidebar": toggleSidebar,
+    "view.present": () => setPresenting(true),
+    "view.readAloud": startReadAloud,
+    "nav.find": () => void openSearch(),
+    "nav.findNext": () => (search.state.hits.length ? search.step(1) : void openSearch()),
+    "nav.findPrev": () => (search.state.hits.length ? search.step(-1) : void openSearch()),
+    "nav.goto": () => document.querySelector<HTMLInputElement>(".doc-view--active .page-input input")?.focus(),
+    "nav.first": () => goPage(0),
+    "nav.last": () => goPage(info.pageCount - 1),
+    "nav.back": () => goHistory("back"),
+    "nav.forward": () => goHistory("forward"),
+    "tool.select": () => setTool("select"),
+    "tool.hand": () => setTool("hand"),
+    "tool.marquee": () => setTool("marquee"),
+    "tool.snapshot": () => setTool("snapshot"),
+    "mode.read": () => setMode("read"),
+    "mode.comment": () => setMode("comment"),
+    "mode.fill": () => setMode("fill"),
+    "mode.organize": () => setMode("organize"),
+    "mode.edit": () => setMode("edit"),
+    "mode.protect": () => setMode("protect"),
+    "protect.security": () => openProtect({ kind: "security" }),
+    "protect.ocr": () => openProtect({ kind: "ocr" }),
+    "protect.compress": () => openProtect({ kind: "compress" }),
+    "protect.pdfa": () => openProtect({ kind: "pdfa" }),
+    "protect.repair": () => openProtect({ kind: "repair" }),
+    "protect.a11y": () => setDialog({ kind: "a11y" }),
+    "window.assistant": () => setAssistantOpen((o) => !o),
+    // Vim-style navigation (the app routes these keys here only when the option is on).
+    "vim.down": () => scrollBy(60),
+    "vim.up": () => scrollBy(-60),
+    "vim.halfDown": () => scrollBy((scroller()?.clientHeight ?? 600) / 2),
+    "vim.halfUp": () => scrollBy(-(scroller()?.clientHeight ?? 600) / 2),
+    "vim.prevPage": () => goPage(currentRef.current - 1),
+    "vim.nextPage": () => goPage(currentRef.current + 1),
+    "vim.first": () => goPage(0),
+    "vim.last": () => goPage(info.pageCount - 1),
+    "vim.find": () => void openSearch(),
+    "vim.next": () => search.state.hits.length && search.step(1),
+    "vim.prev": () => search.state.hits.length && search.step(-1),
+  };
+  const { registerView, onViewScroll } = props;
+  useEffect(() => {
+    if (!registerView) return;
+    registerView({
+      here: () => canvas.current?.here() ?? { page: 0 },
+      scrollTo: (d) => canvas.current?.scrollTo(d),
+      scrollTop: () => canvas.current?.element()?.scrollTop ?? 0,
+    });
+    return () => registerView(null);
+    // Registered once per view; the handle reads the canvas when called.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    const el = canvas.current?.element();
+    if (!el || !onViewScroll || !props.visible) return;
+    el.addEventListener("scroll", onViewScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onViewScroll);
+  }, [onViewScroll, props.visible]);
+  const registerCommands = props.registerCommands;
+  useEffect(() => {
+    if (!active || !registerCommands || presenting) return;
+    const c: DocCommands = { has: (id) => !!commandsRef.current[id], run: (id) => commandsRef.current[id]?.() };
+    registerCommands(c);
+    return () => registerCommands(null, c);
+  }, [active, registerCommands, presenting]);
 
   const annotTool: AnnotTool | null =
     tool === "select" || tool === "hand" || tool === "snapshot" || tool === "marquee" || SELECTION_TOOLS.has(tool as AnnotTool) || EDIT_TOOLS.has(tool as AnnotTool)
@@ -1078,7 +1167,7 @@ export function DocumentView(props: DocumentViewProps) {
   };
 
   return (
-    <div className="doc-view" hidden={!active}>
+    <div className={`doc-view ${active ? "doc-view--active" : ""} ${props.splitSide ? `doc-view--${props.splitSide}` : ""}`} hidden={!active && !props.visible} onPointerDownCapture={props.onFocusView}>
       <Toolbar
         info={info}
         currentPage={currentPage}
@@ -1111,6 +1200,7 @@ export function DocumentView(props: DocumentViewProps) {
         onImportComments={() => void importComments()}
         onFlatten={() => setDialog({ kind: "flatten" })}
         onExport={() => setProtectDialog({ kind: "export", format: "docx" })}
+        onCommand={(id) => (commandsRef.current[id] ? commandsRef.current[id]!() : props.onCommand?.(id))}
       />
       {mode === "comment" && (
         <CommentBar
@@ -1214,6 +1304,8 @@ export function DocumentView(props: DocumentViewProps) {
           onUndo={() => void editor.undo()}
           onRedo={() => void editor.redo()}
           onOpen={setProtectDialog}
+          onTables={() => setDialog({ kind: "tables" })}
+          onA11y={() => setDialog({ kind: "a11y" })}
         />
       )}
       {repairedNotice && (
@@ -1344,7 +1436,7 @@ export function DocumentView(props: DocumentViewProps) {
             ref={canvas}
             info={info}
             data={data}
-            active={active && !presenting}
+            active={(active || !!props.visible) && !presenting}
             scale={scale}
             rotation={rotation}
             mode={layoutMode}
@@ -1412,6 +1504,9 @@ export function DocumentView(props: DocumentViewProps) {
             {status}
           </div>
         </div>
+        {assistantOpen && (
+          <AssistantPanel info={info} name={props.name} currentPage={currentPage} onClose={() => setAssistantOpen(false)} onGoPage={goPage} run={editor.run} />
+        )}
       </div>
       {menu && <Menu label="Page" at={menu} entries={menu.entries} onClose={() => setMenu(null)} />}
       {dialog?.kind === "properties" && (
@@ -1596,6 +1691,21 @@ export function DocumentView(props: DocumentViewProps) {
               setPendingCert({ ...choice, field: null });
               setTool("signbox");
             }
+          }}
+        />
+      )}
+      {dialog?.kind === "tables" && <TablesDialog info={info} name={props.name} onClose={() => setDialog(null)} onStatus={setStatus} />}
+      {dialog?.kind === "a11y" && (
+        <A11yDialog
+          info={info}
+          name={props.name}
+          run={editor.run}
+          onClose={() => setDialog(null)}
+          onStatus={setStatus}
+          onOcr={() => {
+            setDialog(null);
+            setMode("protect");
+            setProtectDialog({ kind: "ocr" });
           }}
         />
       )}

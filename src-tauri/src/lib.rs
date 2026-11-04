@@ -43,6 +43,41 @@ async fn write_file(request: Request<'_>) -> Result<(), String> {
 }
 
 /// The Windows account name, used as the default author of comments.
+/// Files in a folder with one of the given extensions (case-insensitive), optionally including
+/// subfolders. Sorted by path; hidden and temporary files are skipped.
+#[tauri::command]
+async fn list_files(dir: String, extensions: Vec<String>, recursive: bool) -> Result<Vec<String>, String> {
+    let exts: Vec<String> = extensions.iter().map(|e| e.to_lowercase()).collect();
+    let mut out = vec![];
+    let mut stack = vec![PathBuf::from(&dir)];
+    while let Some(d) = stack.pop() {
+        let entries = std::fs::read_dir(&d).map_err(|e| io_message(&d, "read", e))?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || name.starts_with("~$") || name.ends_with(".pdforge-tmp") {
+                continue;
+            }
+            let Ok(kind) = entry.file_type() else { continue };
+            if kind.is_dir() {
+                if recursive {
+                    stack.push(path);
+                }
+            } else if kind.is_file() {
+                let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+                if exts.iter().any(|e| *e == ext) {
+                    out.push(path.to_string_lossy().to_string());
+                }
+            }
+            if out.len() > 10_000 {
+                return Err("That folder has more than 10,000 matching files; choose a smaller one.".into());
+            }
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
 #[tauri::command]
 fn user_name() -> String {
     std::env::var("USERNAME")
@@ -199,6 +234,7 @@ pub fn run() {
             launch_files,
             read_file,
             write_file,
+            list_files,
             user_name,
             recovery_save,
             recovery_list,

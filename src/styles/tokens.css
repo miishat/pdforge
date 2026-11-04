@@ -57,6 +57,13 @@
   --danger: #b42318;
   --danger-hover: #c42b1c;
   --success: #2f7a3d;
+  /* Compare highlights sit on white paper in both themes. */
+  --diff-removed: rgba(214, 48, 49, 0.28);
+  --diff-added: rgba(46, 160, 67, 0.3);
+  --diff-changed: rgba(212, 160, 23, 0.32);
+  --diff-other: #c0632f;
+  --page-number: #8a8276;
+  --scrim: rgba(20, 16, 10, 0.18);
   --warning: #9a6700;
   --focus-ring: #b4532a;
   --paper: #ffffff;

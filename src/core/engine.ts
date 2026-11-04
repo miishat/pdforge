@@ -25,6 +25,9 @@ import {
 } from "./protect";
 import { convertToPdf, documentModel, toDocx, toHtml, toMarkdown, toText, toTiff } from "./convert";
 import { addOcrLayer, hasOcrLayer, hasText, ocrImage, removeOcrLayer, type OcrPage } from "./ocr";
+import { compareWords, diffRegions, wordsOf, type TextComparison, type Word } from "./compare";
+import { findAllTables, toXlsx, type Table } from "./tables";
+import { applyAccessibilityFixes, checkAccessibility, type A11yFixes, type A11yReport } from "./a11y";
 import { hasSignatures, pdfA, type PdfAReport } from "./pdfa";
 import { compressImages, saveOptionsFor, type CompressOptions, type CompressReport } from "./optimize";
 import type {
@@ -964,6 +967,76 @@ export class PdfEngine {
     });
     this.get(docId).text.clear();
     return { ...r, removed };
+  }
+
+  // ---- Compare, tables, accessibility ----
+
+  /** Word-level differences between two open documents. */
+  compareText(docA: number, docB: number): TextComparison & { aPages: number; bPages: number } {
+    const words = (docId: number) => {
+      const { doc } = this.get(docId);
+      const out: Word[] = [];
+      for (let p = 0; p < doc.countPages(); p++) out.push(...wordsOf(this.textLayer(docId, p), p));
+      return out;
+    };
+    const r = compareWords(words(docA), words(docB));
+    return { ...r, aPages: this.get(docA).doc.countPages(), bPages: this.get(docB).doc.countPages() };
+  }
+
+  /**
+   * Areas where page `pageA` of one document looks different from page `pageB` of another, in the
+   * first page's coordinates. The second page is scaled to the first's size.
+   */
+  compareVisual(docA: number, pageA: number, docB: number, pageB: number, dpi = 50): Rect[] {
+    const pa = this.page(this.get(docA).doc, pageA);
+    const pb = this.page(this.get(docB).doc, pageB);
+    try {
+      const [ax0, ay0, ax1, ay1] = pa.getBounds();
+      const [bx0, by0, bx1, by1] = pb.getBounds();
+      const s = dpi / 72;
+      const w = Math.max(1, Math.round((ax1 - ax0) * s));
+      const h = Math.max(1, Math.round((ay1 - ay0) * s));
+      const grey = (page: mupdf.Page, sx: number, sy: number) => {
+        const pix = new mupdf.Pixmap(mupdf.ColorSpace.DeviceGray, [0, 0, w, h], false);
+        pix.clear(255);
+        const dev = new mupdf.DrawDevice(mupdf.Matrix.identity, pix);
+        page.run(dev, mupdf.Matrix.scale(sx, sy));
+        dev.close();
+        const stride = pix.getStride();
+        const src = pix.getPixels();
+        const out = new Uint8Array(w * h);
+        for (let y = 0; y < h; y++) out.set(src.subarray(y * stride, y * stride + w), y * w);
+        pix.destroy();
+        return out;
+      };
+      // Both pages are drawn into the same pixel grid with the exact scale that fills it, so
+      // identical pages give identical pixels (rounding the size alone would shift edges).
+      const sax = w / (ax1 - ax0);
+      const say = h / (ay1 - ay0);
+      const a = grey(pa, sax, say);
+      const b = grey(pb, w / (bx1 - bx0), h / (by1 - by0));
+      return diffRegions(a, b, w, h).map(([x0, y0, x1, y1]) => [x0 / sax + ax0, y0 / say + ay0, x1 / sax + ax0, y1 / say + ay0] as Rect);
+    } finally {
+      pa.destroy();
+      pb.destroy();
+    }
+  }
+
+  findTables(docId: number, pages?: number[]): Table[] {
+    return findAllTables(this.get(docId).doc, pages);
+  }
+
+  async tablesToXlsx(tables: { name: string; rows: string[][] }[]): Promise<Uint8Array> {
+    return toXlsx(tables);
+  }
+
+  checkAccessibility(docId: number, opts: { fileName: string; lang: string }): A11yReport {
+    return checkAccessibility(this.requirePdf(docId), opts);
+  }
+
+  fixAccessibility(docId: number, fixes: A11yFixes): EditResult & { done: string[] } {
+    const r = this.edit(docId, "Fix accessibility", (pdf) => ({ done: applyAccessibilityFixes(pdf, fixes, (nodes) => setOutline(pdf, nodes)) }));
+    return { pages: [], ...r };
   }
 
   // ---- Convert ----

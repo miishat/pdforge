@@ -128,4 +128,31 @@ close-window prompt (all are desktop-only paths; the browser test build download
   Office import is MuPDF's (simple formatting only); passwords with commas or "=" (MuPDF option syntax)
 
 ## Phase 5: Beyond Acrobat
-- ⬜ Compare, batch workflows, command palette, split view, accessibility checker, table extraction, optional AI assistant
+- ✅ Command palette (Ctrl+K): every action (59 commands), searched by words in any order, with shortcuts shown and
+  recently used commands first
+- ✅ Fully rebindable shortcuts (Keyboard shortcuts…): click a command and press the new keys; conflicts move the
+  shortcut instead of doubling it; per-command reset or reset all; reserved Windows keys refused. Saved
+- ✅ Vim-style navigation option: j/k scroll, d/u half screen, h/l previous/next page, gg/G first/last, / find, n/N results
+- ✅ Split view (Ctrl+\\): two open documents side by side, each with its full toolbar (compact at narrow widths),
+  scrolling together (optional); click a side to work in it
+- ✅ Compare two PDFs: word-level text diff across the whole document (moved page breaks and reflow don't count;
+  typographic quotes and dashes are treated as equal), plus a pixel diff per page for pictures and drawings.
+  Side by side with highlights (removed / added / changed / other), synchronised scrolling, and a change list with filters;
+  very different files fall back to page-by-page
+- ✅ Batch actions: saved workflows (recognise text, rotate, compress, watermark, page numbers, remove hidden information,
+  flatten, PDF/A, password) run on chosen files or a folder (with subfolders) on the desktop; results next to each file
+  or in a folder, with a name suffix; per-file results and errors; stop after the current file; passwords are asked for
+  each run and never saved
+- ✅ Accessibility checker: tags, language, title display, real text (scans), Unicode mapping, image alt text,
+  headings, reading order (manual), tab order, link descriptions, form field tooltips, bookmarks for long documents,
+  security blocking assistive technology, contrast (manual). Fixes: language, title, tab order, field tooltips from
+  field names, link descriptions, bookmarks from headings, alt text for tagged images; one undo step
+- ✅ Table extraction: finds tables from aligned rows and columns (wrapped cells and tight spacing handled), preview,
+  export to an Excel workbook (one sheet per table, numbers as numbers, bold header) or CSV files
+- ✅ Optional assistant (off by default): summarise, ask questions with clickable page citations, follow-ups, and
+  suggest form values from the document (each with its source page, applied one by one). Claude via your own
+  Anthropic API key (Claude Opus 5.5, streamed) or a local model through Ollama. Every request shows the pages,
+  size and destination and waits for Send; nothing runs in the background
+- 🟡 Not yet: tagging untagged PDFs (needs the source application), editing reading order, comparing scanned
+  documents (recognise text first), structured outputs from local models depend on the model, the API key is stored
+  in the app's settings rather than Windows Credential Manager

@@ -228,4 +228,27 @@ writeFileSync(new URL("features.pdf", out), rich.saveToBuffer("compress").asUint
   writeFileSync(new URL("damaged.pdf", out), Buffer.from(good.replace(/startxref\s+\d+/, "startxref\n12345"), "latin1"));
 }
 
+// Phase 5: a revised copy of the sample (for Compare) and a page with a table.
+{
+  const v2 = makeDoc([
+    { size: letter, lines: ["PDForge sample document", "Page one of five.", "The quick red fox jumps over the sleepy dog."] },
+    { size: letter, lines: ["Second page", "Searchable text: invoice number 4822."] },
+    { size: [792, 612], lines: ["Landscape page", "This page is wider than it is tall."] },
+    { size: [420, 595], lines: ["A5 page", "Smaller paper size."] },
+    { size: letter, lines: ["Last page", "End of the sample document."] },
+  ]);
+  writeFileSync(new URL("sample-v2.pdf", out), v2.saveToBuffer("compress").asUint8Array());
+}
+{
+  const pdf = new mupdf.PDFDocument();
+  const font = pdf.addSimpleFont(new mupdf.Font("Helvetica"));
+  const rows = [["Region", "Q1", "Q2", "Total"], ["North", "1,200", "1,350", "2,550"], ["South", "980", "1,010", "1,990"], ["West coast", "2,100", "2,240", "4,340"]];
+  const xs = [72, 200, 270, 340];
+  let content = "BT /F1 18 Tf 72 720 Td (Quarterly sales) Tj ET\n";
+  rows.forEach((r, i) => r.forEach((cell, j) => (content += `BT /F1 11 Tf ${xs[j]} ${670 - i * 18} Td (${cell}) Tj ET\n`)));
+  content += "BT /F1 11 Tf 72 570 Td (Figures in thousands.) Tj ET\n";
+  pdf.insertPage(-1, pdf.addPage([0, 0, 612, 792], 0, pdf.addObject({ Font: { F1: font } }), content));
+  writeFileSync(new URL("table.pdf", out), pdf.saveToBuffer("compress").asUint8Array());
+}
+
 console.log("fixtures written");

@@ -37,10 +37,15 @@ Most match Acrobat, so your habits carry over.
 | Print / properties | Ctrl+P / Ctrl+D |
 | Save / save as | Ctrl+S / Ctrl+Shift+S |
 | Undo / redo | Ctrl+Z / Ctrl+Y |
+| Command palette | Ctrl+K |
+| Split view | Ctrl+\\ |
 | Read / Comment / Fill & Sign / Organize / Edit / Protect mode | Ctrl+Shift+1 / 2 / 3 / 4 / 5 / 6 |
 | Organize: select all / delete pages | Ctrl+A / Del |
 | Delete / nudge selected comment | Del / arrow keys (Shift for 10 pt) |
 | Finish a polygon | Double-click or Enter |
+
+Every shortcut can be changed in **Keyboard shortcuts…** (in the ⋯ menu or the command palette), which also
+turns on optional vim-style navigation.
 
 ## Development
 

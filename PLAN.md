@@ -95,6 +95,25 @@ The full brief is in [docs/PROMPT.md](docs/PROMPT.md); progress is tracked in [d
   scan and the text layer line up.
 - `vite preview` sends the desktop app's CSP, so end-to-end tests run under the same rules as the app.
 
+## Beyond Acrobat (Phase 5)
+
+- Commands live in `src/ui/commands.ts` (ids, labels, default shortcuts). The app has one key dispatcher: it maps the
+  normalised key combo (physical keys, so Ctrl+Shift+1 isn't "!") through the effective keymap (defaults plus saved
+  overrides) to a command id, then runs the app's handler or the active document view's. Document views register
+  their handlers while active; context-dependent keys (Delete, arrows, Escape) stay in the view. Vim keys are routed
+  by the dispatcher too.
+- Split view shows two `DocumentView`s in a row; only one is active (keyboard, palette). Scrolling is synced by
+  page and position; an event from the view we just moved, at the position we moved it to, is our own echo.
+- Compare diffs the two documents' word sequences with Myers' algorithm (common prefix/suffix trimmed, edit distance
+  capped; above that it diffs page by page), then renders page pairs at 50 dpi into one pixel grid and groups
+  differing 8×8 cells into regions; regions already explained by text changes are dropped.
+- Tables: text pieces (split at gaps of about an em) form rows by vertical position; a run of multi-cell rows is a
+  table when the word-level whitespace columns line up; single-piece rows that fit the columns, and wrapped cells,
+  join it. XLSX is written with the same ZIP writer as DOCX.
+- The assistant uses the official Anthropic TypeScript SDK in the WebView (`dangerouslyAllowBrowser`, the person's
+  own key), streaming, structured outputs for form suggestions, and the server-side refusal fallback. Local models
+  use Ollama's chat API (localhost only). The CSP allows only those two destinations.
+
 ## Key risks and mitigations
 
 | Risk | Mitigation |

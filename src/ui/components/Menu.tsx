@@ -107,7 +107,8 @@ export function Menu({ entries, at, onClose, label }: MenuProps) {
         );
       })}
     </div>,
-    document.body,
+    // Inside an open modal dialog, everything outside it is inert, so the menu goes into the dialog.
+    portalTarget(),
   );
 }
 
@@ -159,4 +160,9 @@ export function MenuButton({
       )}
     </>
   );
+}
+
+function portalTarget(): Element {
+  const dialogs = document.querySelectorAll("dialog[open]");
+  return dialogs[dialogs.length - 1] ?? document.body;
 }
