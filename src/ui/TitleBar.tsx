@@ -1,27 +1,56 @@
-import { Dismiss16Regular, Square16Regular, Subtract16Regular } from "@fluentui/react-icons";
+import { Add16Regular, Dismiss16Regular, Square16Regular, Subtract16Regular, LockClosed12Regular } from "@fluentui/react-icons";
 import { isDesktop, windowAction } from "../platform";
 import { Mark } from "./Mark";
+import type { Tab } from "./useTabs";
 
 interface Props {
-  tabTitle: string | null;
-  onCloseTab: () => void;
+  tabs: Tab[];
+  activeId: number | null;
+  onActivate: (id: number) => void;
+  onClose: (id: number) => void;
+  onNew: () => void;
 }
 
-export function TitleBar({ tabTitle, onCloseTab }: Props) {
+export function TitleBar({ tabs, activeId, onActivate, onClose, onNew }: Props) {
   return (
     <header className="titlebar" data-tauri-drag-region>
       <div className="titlebar__brand" data-tauri-drag-region>
         <Mark size={16} />
       </div>
-      <div className="titlebar__tabs" role="tablist" data-tauri-drag-region>
-        {tabTitle && (
-          <div className="tab tab--active" role="tab" aria-selected="true" title={tabTitle}>
-            <span className="tab__label">{tabTitle}</span>
-            <button className="tab__close" aria-label={`Close ${tabTitle}`} title="Close (Ctrl+W)" onClick={onCloseTab}>
+      <div className="titlebar__tabs" role="tablist" aria-label="Open documents" data-tauri-drag-region>
+        {tabs.map((t) => (
+          <div
+            key={t.id}
+            className={`tab ${t.id === activeId ? "tab--active" : ""}`}
+            role="tab"
+            aria-selected={t.id === activeId}
+            tabIndex={t.id === activeId ? 0 : -1}
+            title={t.path ?? t.name}
+            onClick={() => onActivate(t.id)}
+            onAuxClick={(e) => e.button === 1 && onClose(t.id)}
+            onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onActivate(t.id)}
+          >
+            {t.state.kind === "locked" && <LockClosed12Regular className="tab__icon" />}
+            <span className="tab__label">{t.name}</span>
+            <button
+              className="tab__close"
+              aria-label={`Close ${t.name}`}
+              title="Close (Ctrl+W)"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose(t.id);
+              }}
+            >
               <Dismiss16Regular />
             </button>
           </div>
+        ))}
+        {tabs.length > 0 && (
+          <button className="titlebar__new" aria-label="Open a file" title="Open (Ctrl+O)" onClick={onNew}>
+            <Add16Regular />
+          </button>
         )}
+        <div className="titlebar__drag" data-tauri-drag-region />
       </div>
       {isDesktop && (
         <div className="window-controls">

@@ -12,17 +12,30 @@ Legend: ✅ done and tested · 🟡 partial · ⬜ not started
 - ✅ Unit tests (engine, zoom), Playwright end-to-end tests, CI building the Windows installer
 
 ## Phase 1: Viewer (Acrobat Reader parity)
-- ⬜ Multiple tabs; single-instance (opening a 2nd file adds a tab); recent files with thumbnails on the start screen
-- ⬜ Snap Layouts on the custom maximize button
-- ⬜ Cancellable priority render queue; tiled rendering for very high zoom
-- ⬜ Zoom field with typed value and presets; marquee zoom; rotate view; two-page/book layouts
-- ⬜ Sidebar: thumbnails, outline/bookmarks, attachments, layers, annotations list
-- ⬜ Full-text search (regex, case, whole word), hit list, highlights
-- ⬜ Text selection and copy; area copy as image
-- ⬜ Links, back/forward history
-- ⬜ Presentation mode, read aloud, night/sepia reading modes
-- ⬜ Print (ranges, scaling, booklet, N-up)
-- ⬜ Document properties
+- ✅ Tabs: open several files, Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+W, middle-click to close; reopening a file focuses its tab
+- ✅ Single instance: double-clicking a PDF while PDForge is open adds a tab instead of a second window
+- ✅ Recent files on the start screen with thumbnails, folder, time, the page you were on (reopens there), and removal
+- ⬜ Snap Layouts on the custom maximize button (needs a native window hook; planned)
+- ✅ Prioritized, cancellable render queue (visible pages first, stale renders dropped)
+- ✅ Sharp detail tile at very high zoom (base bitmap capped at 12 MP)
+- ✅ Zoom field (type a value) with presets, Automatic / Fit width / Fit page / Actual size; Ctrl+wheel zooms around the cursor
+- ✅ Marquee zoom (Z); rotate view (Ctrl+Shift+Plus/Minus); single, two-page and two-page-with-cover layouts
+- ✅ Sidebar (F4): page thumbnails, bookmarks, search results, comments, attachments (save a copy), layers (show/hide).
+  Empty panels are hidden
+- ✅ Full-text search (Ctrl+F, F3): match case, whole words, regex, live count, highlights, results list; runs in batches
+- ✅ Text selection: drag, Shift+click to extend, double-click word, triple-click line, across pages; Ctrl+C, Ctrl+A
+- ✅ Snapshot tool (G): copy any area as an image
+- ✅ Right-click menu: copy, find selected text, select all, tools, rotate, print, properties
+- ✅ Links: internal jumps; external links ask first and only open web and mail links. Back/forward with Alt+←/→
+- ✅ Presentation mode (Ctrl+L / F5), read aloud with system voices (Ctrl+Shift+Y), night and sepia reading modes
+- 🟡 Print (Ctrl+P): all, current page or a range, at 150 or 300 dpi, using the Windows print dialog for printer,
+  paper, copies and scaling. Booklet and N-up printing aren't built yet
+- ✅ Document properties (Ctrl+D): description, file, page size, PDF version, encryption, permissions, fonts
+- ✅ Respects document permissions for copying and printing
+- ✅ Hand tool (H, or hold Space); Home/End; Ctrl+G jumps to the page box
+
+Not verified on real Windows yet (the tests run in Chromium, the same engine as WebView2): printing through the Windows
+dialog, the single-instance hand-off, and saving attachments with the native Save dialog.
 
 ## Phase 2: Annotate, fill and sign
 - ⬜ Text markup, notes, free text, shapes, ink, stamps, measurement

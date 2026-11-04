@@ -28,17 +28,26 @@ The full brief is in [docs/PROMPT.md](docs/PROMPT.md); progress is tracked in [d
 
 ## Rendering
 
-- Continuous vertical layout; every page is a correctly-sized placeholder, so the scrollbar is right immediately.
-- An IntersectionObserver marks pages within 1200px of the viewport as active; only active pages hold bitmaps.
-- Pages render at `zoom × 96/72 × devicePixelRatio`, so text is sharp at any Windows display scaling.
-- On zoom, the old bitmap is stretched instantly and a sharp one replaces it about 140ms later. The scroll position
-  is anchored to the page under the top of the viewport.
+- Layout (`src/ui/layout.ts`) computes a box for every page (single, two-page, or two-page with a cover; any rotation).
+  Only pages within one viewport of the visible area are mounted, so 1,000-page files stay light.
+- Renders go through a UI-side priority queue (`EngineClient.render`): at most two in flight, nearest pages first,
+  and requests for pages that scrolled away are dropped before they reach the worker.
+- Pages render at `zoom × 96/72 × devicePixelRatio`. Each page's base bitmap is capped at 12 MP; beyond that, a
+  viewport-sized detail tile is rendered on top at full resolution.
+- On zoom/rotate/layout changes, the scroll position is re-anchored to the same spot on the same page (or the cursor
+  position for Ctrl+wheel), using the scroll offset from *before* the change.
+
+## Text, search and selection
+
+- The engine returns a per-page `TextLayer`: text in reading order plus a quad and line number per character.
+- Selection, word/line snapping, copy and highlight geometry are pure functions in `src/core/textlayer.ts`
+  running on the UI thread, so dragging is instant. Search runs in the worker in 25-page batches.
 
 ## Key risks and mitigations
 
 | Risk | Mitigation |
 | --- | --- |
-| Render queue backs up on fast scroll through huge files | Phase 1: cancellable, priority-ordered render queue (visible pages first), tile rendering above ~4000px |
+| Render queue backs up on fast scroll through huge files | Done in Phase 1: cancellable, priority-ordered queue and detail tiles |
 | Saving must never corrupt a file | Rust-side atomic write (temp + rename), incremental saves via MuPDF, crash-recovery journal |
 | Custom title bar loses Windows 11 Snap Layouts | Phase 1: answer `WM_NCHITTEST` with `HTMAXBUTTON` for the maximize button (native subclass) |
 | WebView2 missing on old Windows 10 | NSIS installer bootstraps WebView2 (Tauri default) |

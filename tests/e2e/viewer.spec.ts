@@ -12,14 +12,15 @@ async function openFile(page: Page, name: string) {
 test("start screen offers to open a file", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("button", { name: /Open a PDF/ })).toBeVisible();
-  await expect(page.getByText("Or drag a file into this window.")).toBeVisible();
+  await expect(page.getByText("Or drag files into this window.")).toBeVisible();
 });
 
 test("opens a PDF and renders the first page", async ({ page }) => {
   await openFile(page, "sample.pdf");
   await expect(page.getByRole("tab", { name: /sample\.pdf/ })).toBeVisible();
-  await expect(page.locator(".page")).toHaveCount(5);
-  await expect(page.locator('.page[data-index="0"] canvas')).toHaveAttribute("data-rendered", "true");
+  // Only pages near the viewport are mounted.
+  await expect(page.locator(".page").first()).toBeVisible();
+  await expect(page.locator('.page[data-index="0"] canvas.page__canvas')).toHaveAttribute("data-rendered", "true");
   await expect(page.locator(".page-input__total")).toHaveText("of 5");
   await expect(page).toHaveTitle("sample.pdf – PDForge");
 });
@@ -28,13 +29,14 @@ test("zoom controls change the zoom level", async ({ page }) => {
   await openFile(page, "sample.pdf");
   await page.getByRole("button", { name: "Zoom in" }).waitFor();
   await page.keyboard.press("Control+1");
-  await expect(page.getByLabel("Zoom level")).toHaveText("100%");
+  await expect(page.getByLabel("Zoom level")).toHaveValue("100%");
   await page.getByRole("button", { name: "Zoom in" }).click();
-  await expect(page.getByLabel("Zoom level")).toHaveText("110%");
+  await expect(page.getByLabel("Zoom level")).toHaveValue("110%");
   const width = await page.locator('.page[data-index="0"]').evaluate((el) => el.getBoundingClientRect().width);
   expect(Math.round(width)).toBe(Math.round(612 * (96 / 72) * 1.1));
-  await page.getByRole("button", { name: "Fit page" }).click();
-  await expect(page.getByRole("button", { name: "Fit page" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByLabel("Zoom level").fill("250");
+  await page.getByLabel("Zoom level").press("Enter");
+  await expect(page.getByLabel("Zoom level")).toHaveValue("250%");
 });
 
 test("go to a page by number", async ({ page }) => {
@@ -42,7 +44,7 @@ test("go to a page by number", async ({ page }) => {
   const input = page.getByLabel("Page number");
   await input.fill("4");
   await input.press("Enter");
-  await expect(page.locator('.page[data-index="3"] canvas')).toHaveAttribute("data-rendered", "true");
+  await expect(page.locator('.page[data-index="3"] canvas.page__canvas')).toHaveAttribute("data-rendered", "true");
   await expect(input).toHaveValue("4");
 });
 
@@ -50,11 +52,11 @@ test("password-protected PDF asks for the password", async ({ page }) => {
   await openFile(page, "encrypted.pdf");
   await expect(page.getByRole("heading", { name: "This PDF is password-protected" })).toBeVisible();
   await page.getByLabel("Password").fill("wrong");
-  await page.getByRole("button", { name: "Open" }).click();
+  await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page.getByText("That password isn't right. Try again.")).toBeVisible();
   await page.getByLabel("Password").fill("secret");
-  await page.getByRole("button", { name: "Open" }).click();
-  await expect(page.locator('.page[data-index="0"] canvas')).toHaveAttribute("data-rendered", "true");
+  await page.getByRole("button", { name: "Open", exact: true }).click();
+  await expect(page.locator('.page[data-index="0"] canvas.page__canvas')).toHaveAttribute("data-rendered", "true");
 });
 
 test("a file that isn't a PDF shows a clear error", async ({ page }) => {
@@ -75,7 +77,7 @@ test("a 300-page document opens fast and only renders nearby pages", async ({ pa
   const t0 = Date.now();
   const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Open a PDF/ }).click()]);
   await chooser.setFiles(fixture("long-300.pdf"));
-  await expect(page.locator('.page[data-index="0"] canvas')).toHaveAttribute("data-rendered", "true");
+  await expect(page.locator('.page[data-index="0"] canvas.page__canvas')).toHaveAttribute("data-rendered", "true");
   expect(Date.now() - t0).toBeLessThan(3000);
   const rendered = await page.locator('canvas[data-rendered="true"]').count();
   expect(rendered).toBeLessThan(10);

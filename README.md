@@ -2,7 +2,7 @@
 
 A fast, private, offline PDF reader and editor for Windows: a personal replacement for Adobe Acrobat.
 
-> Status: **Phase 0** (foundation). It opens and reads PDFs. See [docs/FEATURES.md](docs/FEATURES.md) for what works.
+> Status: **Phase 1** (a full reader: tabs, search, selection, sidebar, print, presentation). See [docs/FEATURES.md](docs/FEATURES.md) for what works.
 
 ## Install on Windows
 
@@ -17,12 +17,24 @@ Or right-click any PDF **→ Open with → Choose another app → PDForge → Al
 
 ## Keyboard shortcuts
 
+Most match Acrobat, so your habits carry over.
+
 | Action | Shortcut |
 | --- | --- |
-| Open a file | Ctrl+O |
-| Close the document | Ctrl+W |
+| Open / close / next tab | Ctrl+O / Ctrl+W / Ctrl+Tab |
+| Find, next, previous | Ctrl+F, F3 (or Enter), Shift+F3 |
+| Copy selection / select all | Ctrl+C / Ctrl+A |
 | Zoom in / out | Ctrl++ / Ctrl+− (or Ctrl+mouse wheel) |
 | Fit page / actual size / fit width | Ctrl+0 / Ctrl+1 / Ctrl+2 |
+| Rotate view | Ctrl+Shift++ / Ctrl+Shift+− |
+| Go to page | Ctrl+G |
+| First / last page | Home / End |
+| Back / forward (after following a link) | Alt+← / Alt+→ |
+| Sidebar | F4 |
+| Select / hand / snapshot / marquee zoom | V / H (or hold Space) / G / Z |
+| Presentation | Ctrl+L or F5 |
+| Read aloud | Ctrl+Shift+Y |
+| Print / properties | Ctrl+P / Ctrl+D |
 
 ## Development
 

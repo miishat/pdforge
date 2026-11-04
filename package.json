@@ -19,6 +19,7 @@
     "@fluentui/react-icons": "^2.0.345",
     "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-dialog": "^2.8.4",
+    "@tauri-apps/plugin-opener": "^2.7.2",
     "mupdf": "^1.28.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

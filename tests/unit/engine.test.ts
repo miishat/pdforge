@@ -20,7 +20,7 @@ describe("PdfEngine", () => {
     const engine = new PdfEngine();
     const result = engine.open(fixture("sample.pdf"));
     if (result.status !== "ok") throw new Error("expected ok");
-    const page = engine.render(result.info.docId, 0, 0.5);
+    const page = engine.render({ docId: result.info.docId, pageIndex: 0, scale: 0.5, rotation: 0 });
     expect(page.width).toBe(306);
     expect(page.height).toBe(396);
     expect(page.pixels.length).toBe(306 * 396 * 4);
