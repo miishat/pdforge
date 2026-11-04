@@ -17,6 +17,9 @@ export interface Tab {
   fileSize: number;
   initialPage: number;
   state: TabState;
+  dirty: boolean;
+  /** Restored from crash recovery: counts as changed until saved. */
+  recovered?: boolean;
 }
 
 let nextTabId = 1;
@@ -29,15 +32,15 @@ export function useTabs() {
 
   const patch = (id: number, state: TabState) => setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, state } : t)));
 
-  const open = useCallback(async (file: PickedFile, initialPage = 0) => {
+  const open = useCallback(async (file: PickedFile, initialPage = 0, opts: { recovered?: boolean } = {}) => {
     // A file that is already open just gets focus.
-    const existing = file.path ? tabsRef.current.find((t) => t.path && samePath(t.path, file.path!)) : undefined;
+    const existing = file.path && !opts.recovered ? tabsRef.current.find((t) => t.path && samePath(t.path, file.path!)) : undefined;
     if (existing) {
       setActiveId(existing.id);
       return;
     }
     const id = nextTabId++;
-    const tab: Tab = { id, name: file.name, path: file.path, fileSize: file.bytes.byteLength, initialPage, state: { kind: "loading" } };
+    const tab: Tab = { id, name: file.name, path: file.path, fileSize: file.bytes.byteLength, initialPage, state: { kind: "loading" }, dirty: false, recovered: opts.recovered };
     setTabs((ts) => [...ts, tab]);
     setActiveId(id);
     try {
@@ -49,7 +52,10 @@ export function useTabs() {
         return;
       }
       if (result.status === "needs-password") patch(id, { kind: "locked", docId: result.docId, wrongPassword: false });
-      else patch(id, { kind: "ready", info: result.info });
+      else {
+        if (opts.recovered) await engine().call("markDirty", result.info.docId);
+        patch(id, { kind: "ready", info: result.info });
+      }
     } catch (err) {
       patch(id, { kind: "error", message: err instanceof Error ? err.message : String(err) });
     }
@@ -89,5 +95,13 @@ export function useTabs() {
     });
   }, []);
 
-  return { tabs, activeId, setActiveId, open, unlock, close, cycle };
+  const setDirty = useCallback((id: number, dirty: boolean) => {
+    setTabs((ts) => (ts.some((t) => t.id === id && t.dirty !== dirty) ? ts.map((t) => (t.id === id ? { ...t, dirty } : t)) : ts));
+  }, []);
+
+  const relocate = useCallback((id: number, path: string | null, name: string) => {
+    setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, path: path ?? t.path, name, recovered: false } : t)));
+  }, []);
+
+  return { tabs, activeId, setActiveId, open, unlock, close, cycle, setDirty, relocate };
 }

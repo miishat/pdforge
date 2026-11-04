@@ -2,6 +2,7 @@ import {
   ArrowDownload20Regular,
   Attach20Regular,
   Bookmark20Regular,
+  Certificate20Regular,
   ChevronDown16Regular,
   ChevronRight16Regular,
   CommentMultiple20Regular,
@@ -11,11 +12,11 @@ import {
 } from "@fluentui/react-icons";
 import { memo, useEffect, useRef, useState } from "react";
 import { CancelledError, engine } from "../../core/client";
-import type { AnnotationInfo, AttachmentInfo, DocInfo, LayerInfo, OutlineNode } from "../../core/types";
+import type { AttachmentInfo, DocInfo, LayerInfo, OutlineNode } from "../../core/types";
 import type { Dest } from "./Canvas";
 import type { SearchState } from "./useSearch";
 
-export type Panel = "thumbnails" | "outline" | "search" | "comments" | "attachments" | "layers";
+export type Panel = "thumbnails" | "outline" | "search" | "comments" | "attachments" | "layers" | "signatures";
 
 interface Props {
   info: DocInfo;
@@ -31,6 +32,8 @@ interface Props {
   onSelectHit: (i: number) => void;
   onSaveAttachment: (name: string) => void;
   onToggleLayer: (index: number, visible: boolean) => void;
+  comments: React.ReactNode;
+  signatures: React.ReactNode | null;
 }
 
 const PANELS: { id: Panel; label: string; icon: JSX.Element }[] = [
@@ -40,6 +43,7 @@ const PANELS: { id: Panel; label: string; icon: JSX.Element }[] = [
   { id: "comments", label: "Comments", icon: <CommentMultiple20Regular /> },
   { id: "attachments", label: "Attachments", icon: <Attach20Regular /> },
   { id: "layers", label: "Layers", icon: <Layer20Regular /> },
+  { id: "signatures", label: "Signatures", icon: <Certificate20Regular /> },
 ];
 
 export function Sidebar(props: Props) {
@@ -50,7 +54,8 @@ export function Sidebar(props: Props) {
       (p.id !== "outline" || props.outline.length > 0) &&
       (p.id !== "attachments" || props.attachments.length > 0) &&
       (p.id !== "layers" || props.layers.length > 0) &&
-      (p.id !== "search" || !!props.search.query),
+      (p.id !== "search" || !!props.search.query) &&
+      (p.id !== "signatures" || props.signatures !== null),
   );
   const shown = available.some((p) => p.id === panel) ? panel : "thumbnails";
   const title = PANELS.find((p) => p.id === shown)!.label;
@@ -77,7 +82,8 @@ export function Sidebar(props: Props) {
           {shown === "thumbnails" && <Thumbnails {...props} />}
           {shown === "outline" && <OutlineTree nodes={props.outline} onGo={props.onGo} depth={0} />}
           {shown === "search" && <SearchResults search={props.search} onSelect={props.onSelectHit} labels={props.info.labels} />}
-          {shown === "comments" && <Comments docId={props.info.docId} onGo={props.onGo} labels={props.info.labels} />}
+          {shown === "comments" && props.comments}
+          {shown === "signatures" && props.signatures}
           {shown === "attachments" && <Attachments items={props.attachments} onSave={props.onSaveAttachment} />}
           {shown === "layers" && <Layers items={props.layers} onToggle={props.onToggleLayer} />}
         </div>
@@ -234,62 +240,6 @@ function SearchResults({ search, onSelect, labels }: { search: SearchState; onSe
         );
       })}
     </ol>
-  );
-}
-
-const ANNOT_LABELS: Record<string, string> = {
-  Text: "Note",
-  FreeText: "Text box",
-  Highlight: "Highlight",
-  Underline: "Underline",
-  StrikeOut: "Strikethrough",
-  Squiggly: "Squiggly underline",
-  Ink: "Drawing",
-  Square: "Rectangle",
-  Circle: "Ellipse",
-  Line: "Line",
-  Polygon: "Polygon",
-  PolyLine: "Polyline",
-  Stamp: "Stamp",
-  FileAttachment: "Attached file",
-  Caret: "Insert text",
-  Redact: "Redaction mark",
-};
-
-function Comments({ docId, onGo, labels }: { docId: number; onGo: (d: Dest) => void; labels: string[] | null }) {
-  const [items, setItems] = useState<AnnotationInfo[] | null>(null);
-  useEffect(() => {
-    let alive = true;
-    engine()
-      .call("annotations", docId)
-      .then((a) => alive && setItems(a), () => alive && setItems([]));
-    return () => {
-      alive = false;
-    };
-  }, [docId]);
-  if (!items) return <p className="sidebar__empty">Loading comments…</p>;
-  if (!items.length) return <p className="sidebar__empty">This document has no comments.</p>;
-  return (
-    <ul className="comments">
-      {items.map((a, i) => (
-        <li key={i}>
-          <button className="comment" onClick={() => onGo({ page: a.page, rect: a.rect })}>
-            <span className="comment__meta">
-              <span className="comment__type">{ANNOT_LABELS[a.type] ?? a.type}</span>
-              <span>Page {labels?.[a.page] ?? a.page + 1}</span>
-            </span>
-            {a.contents && <span className="comment__text">{a.contents}</span>}
-            {(a.author || a.modified) && (
-              <span className="comment__by">
-                {a.author}
-                {a.author && a.modified ? " · " : ""}
-                {a.modified ? new Date(a.modified).toLocaleDateString() : ""}
-              </span>
-            )}
-          </button>
-        </li>
-      ))}
-    </ul>
   );
 }
 

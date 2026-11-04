@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { engine } from "./core/client";
 import type { DocInfo } from "./core/types";
-import { fromBrowserFile, isDesktop, launchFiles, onOpenFiles, pickPdfs, readPath, setWindowTitle, type PickedFile } from "./platform";
+import {
+  fromBrowserFile, isDesktop, launchFiles, onOpenFiles, onWindowCloseRequested, pickPdfs, readPath, recoveryClear, recoveryList,
+  recoveryRead, setWindowTitle, type PickedFile, type RecoveryMeta,
+} from "./platform";
+import { UnsavedDialog } from "./ui/doc/Dialogs";
 import { DocumentView } from "./ui/doc/DocumentView";
 import { ErrorPanel } from "./ui/ErrorPanel";
 import { PasswordPrompt } from "./ui/PasswordPrompt";
@@ -10,8 +14,49 @@ import { StartScreen } from "./ui/StartScreen";
 import { TitleBar } from "./ui/TitleBar";
 import { useTabs, type Tab } from "./ui/useTabs";
 
+/** Distinguishes this run's recovery files from those left by a previous (crashed) run. */
+const SESSION = Date.now().toString(36);
+
 export function App() {
-  const { tabs, activeId, setActiveId, open, unlock, close, cycle } = useTabs();
+  const { tabs, activeId, setActiveId, open, unlock, close: closeNow, cycle, setDirty, relocate } = useTabs();
+  const savers = useRef(new Map<number, () => Promise<boolean>>());
+  const [prompt, setPrompt] = useState<{ ids: number[]; resolve: (ok: boolean) => void } | null>(null);
+  const [recoveries, setRecoveries] = useState<{ key: string; meta: RecoveryMeta }[]>([]);
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+
+  /** Asks about unsaved changes in these tabs. Resolves true when it's fine to close them. */
+  const confirmClose = useCallback((ids: number[]): Promise<boolean> => {
+    const dirty = ids.filter((id) => tabsRef.current.find((t) => t.id === id)?.dirty);
+    if (!dirty.length) return Promise.resolve(true);
+    return new Promise((resolve) => setPrompt({ ids: dirty, resolve }));
+  }, []);
+
+  const close = useCallback(
+    async (id: number) => {
+      if (await confirmClose([id])) {
+        void recoveryClear(`${SESSION}-${id}`);
+        closeNow(id);
+      }
+    },
+    [confirmClose, closeNow],
+  );
+
+  // Closing the window with unsaved work asks first.
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    onWindowCloseRequested(async () => {
+      const ok = await confirmClose(tabsRef.current.map((t) => t.id));
+      if (ok) for (const t of tabsRef.current) await recoveryClear(`${SESSION}-${t.id}`);
+      return ok;
+    }).then((u) => (off = u));
+    return () => off?.();
+  }, [confirmClose]);
+
+  // Documents left unsaved by a previous run that didn't close properly.
+  useEffect(() => {
+    recoveryList().then((list) => setRecoveries(list.filter((r) => !r.key.startsWith(`${SESSION}-`))));
+  }, []);
   const [dragging, setDragging] = useState(false);
   const [recent, setRecent] = useState<RecentFile[]>(() => (isDesktop ? loadRecent() : []));
   const [missing, setMissing] = useState<Set<string>>(() => new Set());
@@ -139,6 +184,21 @@ export function App() {
       <TitleBar tabs={tabs} activeId={activeId} onActivate={setActiveId} onClose={close} onNew={openDialog} />
       {!active && (
         <StartScreen
+          recoveries={recoveries}
+          onRecover={async (r) => {
+            try {
+              const bytes = await recoveryRead(r.key);
+              await open({ name: r.meta.name, path: r.meta.path, bytes }, 0, { recovered: true });
+              await recoveryClear(r.key);
+            } catch {
+              /* unreadable recovery file */
+            }
+            setRecoveries((l) => l.filter((x) => x.key !== r.key));
+          }}
+          onDiscardRecovery={(r) => {
+            void recoveryClear(r.key);
+            setRecoveries((l) => l.filter((x) => x.key !== r.key));
+          }}
           recent={recent}
           missing={missing}
           onOpen={openDialog}
@@ -183,10 +243,44 @@ export function App() {
                 initialPage={t.initialPage}
                 onPageChange={(p) => onPageChange(t, p)}
                 onClose={() => close(t.id)}
+                onEditState={(st) => setDirty(t.id, st.dirty || !!t.recovered)}
+                onSaved={(path, name) => {
+                  relocate(t.id, path, name);
+                  setDirty(t.id, false);
+                  if (path) setRecent((list) => addRecent(list, { path, name, openedAt: Date.now(), pageCount: (t.state as { info: DocInfo }).info.pageCount }));
+                }}
+                registerSave={(fn) => {
+                  if (fn) savers.current.set(t.id, fn);
+                  else savers.current.delete(t.id);
+                }}
+                recoveryKey={`${SESSION}-${t.id}`}
               />
             );
         }
       })}
+      {prompt && (
+        <UnsavedDialog
+          names={prompt.ids.map((id) => tabsRef.current.find((t) => t.id === id)?.name ?? "Document")}
+          onCancel={() => {
+            prompt.resolve(false);
+            setPrompt(null);
+          }}
+          onDiscard={() => {
+            prompt.resolve(true);
+            setPrompt(null);
+          }}
+          onSave={async () => {
+            const p = prompt;
+            setPrompt(null);
+            for (const id of p.ids) {
+              setActiveId(id);
+              const save = savers.current.get(id);
+              if (!save || !(await save())) return p.resolve(false);
+            }
+            p.resolve(true);
+          }}
+        />
+      )}
       {dragging && (
         <div className="drop-overlay" aria-hidden="true">
           <span>Drop to open</span>

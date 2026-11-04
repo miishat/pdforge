@@ -420,6 +420,11 @@ export class PdfEngine {
     return this.edit(docId, "Import comments", (pdf) => importItems(pdf, items, fallbackAuthor));
   }
 
+  /** Marks a document as changed without an undo step (e.g. one restored from crash recovery). */
+  markDirty(docId: number): void {
+    this.get(docId).dirtyOutsideJournal = true;
+  }
+
   undo(docId: number): EditResult {
     const pdf = this.requirePdf(docId);
     if (pdf.canUndo()) pdf.undo();

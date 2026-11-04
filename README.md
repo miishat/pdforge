@@ -2,7 +2,7 @@
 
 A fast, private, offline PDF reader and editor for Windows: a personal replacement for Adobe Acrobat.
 
-> Status: **Phase 1** (a full reader: tabs, search, selection, sidebar, print, presentation). See [docs/FEATURES.md](docs/FEATURES.md) for what works.
+> Status: **Phase 2**: a full reader plus comments, form filling and signatures. See [docs/FEATURES.md](docs/FEATURES.md) for what works.
 
 ## Install on Windows
 
@@ -35,6 +35,11 @@ Most match Acrobat, so your habits carry over.
 | Presentation | Ctrl+L or F5 |
 | Read aloud | Ctrl+Shift+Y |
 | Print / properties | Ctrl+P / Ctrl+D |
+| Save / save as | Ctrl+S / Ctrl+Shift+S |
+| Undo / redo | Ctrl+Z / Ctrl+Y |
+| Read / Comment / Fill & Sign mode | Ctrl+Shift+1 / 2 / 3 |
+| Delete / nudge selected comment | Del / arrow keys (Shift for 10 pt) |
+| Finish a polygon | Double-click or Enter |
 
 ## Development
 

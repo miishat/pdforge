@@ -1,5 +1,6 @@
 import { Dismiss16Regular, FolderOpen20Regular } from "@fluentui/react-icons";
 import { Mark } from "./Mark";
+import type { RecoveryMeta } from "../platform";
 import { timeAgo, type RecentFile } from "./recent";
 
 interface Props {
@@ -8,12 +9,15 @@ interface Props {
   onOpen: () => void;
   onOpenRecent: (r: RecentFile) => void;
   onRemoveRecent: (r: RecentFile) => void;
+  recoveries: { key: string; meta: RecoveryMeta }[];
+  onRecover: (r: { key: string; meta: RecoveryMeta }) => void;
+  onDiscardRecovery: (r: { key: string; meta: RecoveryMeta }) => void;
 }
 
-export function StartScreen({ recent, missing, onOpen, onOpenRecent, onRemoveRecent }: Props) {
+export function StartScreen({ recent, missing, onOpen, onOpenRecent, onRemoveRecent, recoveries, onRecover, onDiscardRecovery }: Props) {
   return (
     <main className="start">
-      <div className={`start__inner ${recent.length ? "start__inner--with-recent" : ""}`}>
+      <div className={`start__inner ${recent.length || recoveries.length ? "start__inner--with-recent" : ""}`}>
         <div className="start__brand">
           <Mark size={28} />
           <span className="start__wordmark">PDForge</span>
@@ -26,6 +30,21 @@ export function StartScreen({ recent, missing, onOpen, onOpenRecent, onRemoveRec
           </button>
           <p className="start__hint">Or drag files into this window.</p>
         </div>
+        {recoveries.length > 0 && (
+          <section className="recovery" aria-labelledby="recovery-title">
+            <h2 id="recovery-title" className="recovery__title">PDForge closed before these changes were saved</h2>
+            <ul className="recovery__list">
+              {recoveries.map((r) => (
+                <li key={r.key} className="recovery__item">
+                  <span className="recovery__name">{r.meta.name}</span>
+                  <span className="recovery__when">{timeAgo(r.meta.savedAt)}</span>
+                  <button className="button button--small button--primary" onClick={() => onRecover(r)}>Recover</button>
+                  <button className="button button--small" onClick={() => onDiscardRecovery(r)}>Discard</button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         {recent.length > 0 && (
           <section className="recent" aria-labelledby="recent-title">
             <h2 id="recent-title" className="recent__title">

@@ -43,6 +43,21 @@ The full brief is in [docs/PROMPT.md](docs/PROMPT.md); progress is tracked in [d
 - Selection, word/line snapping, copy and highlight geometry are pure functions in `src/core/textlayer.ts`
   running on the UI thread, so dragging is instant. Search runs in the worker in 25-page batches.
 
+## Editing (Phase 2)
+
+- Every change runs inside a MuPDF journal operation (`PdfEngine.edit`), so undo/redo is MuPDF's own and covers
+  annotations, form values and imports alike. "Unsaved" = journal position differs from the position at the last save.
+- Edits return the pages they touched; `DocData.invalidate` drops those pages' caches and bumps their render keys,
+  so only affected pages re-render.
+- Annotation overlays (`AnnotLayer`) and form overlays (`FormLayer`) are HTML on top of each page. Forms use real
+  inputs that are transparent until focused, so the PDF's own appearance shows but keyboard and screen readers work.
+- Form scripts are never executed. `formScripts.ts` recognises Acrobat's standard helpers and parses simple arithmetic
+  into an AST; anything else is counted and reported.
+- Signing adds a signature dictionary with fixed-width placeholders, saves incrementally, patches /ByteRange, hashes
+  the covered bytes and embeds a CMS (PKI.js on WebCrypto; PKCS#12 parsing by node-forge). Verification re-hashes
+  the exact file bytes, which the engine keeps in sync after every save.
+- Crash recovery: the desktop app writes unsaved documents to `%LOCALAPPDATA%\com.miishat.pdforge\recovery` every 30 s.
+
 ## Key risks and mitigations
 
 | Risk | Mitigation |

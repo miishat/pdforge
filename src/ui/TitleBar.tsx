@@ -32,6 +32,7 @@ export function TitleBar({ tabs, activeId, onActivate, onClose, onNew }: Props) 
           >
             {t.state.kind === "locked" && <LockClosed12Regular className="tab__icon" />}
             <span className="tab__label">{t.name}</span>
+            {t.dirty && <span className="tab__dirty" title="Unsaved changes" aria-label="Unsaved changes" />}
             <button
               className="tab__close"
               aria-label={`Close ${t.name}`}

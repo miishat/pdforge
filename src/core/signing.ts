@@ -127,6 +127,8 @@ export interface SignOptions {
   image?: Uint8Array;
   /** Signing time, for tests; defaults to now. */
   date?: Date;
+  /** Object number of an existing, empty signature field to sign into (instead of adding one). */
+  fieldId?: number;
 }
 
 /**
@@ -172,6 +174,20 @@ function addSignatureField(pdf: mupdf.PDFDocument, identity: Identity, opts: Sig
   const r = opts.rect ? mupdf.Rect.transform(opts.rect, toPdf) : [0, 0, 0, 0];
   const pdfRect: Rect = [Math.min(r[0], r[2]), Math.min(r[1], r[3]), Math.max(r[0], r[2]), Math.max(r[1], r[3])];
   const existing = countSignatureFields(pdf);
+  const target = opts.fieldId != null ? page.getWidgets().find((w) => w.getObject().asIndirect() === opts.fieldId) : undefined;
+  if (target) {
+    const obj = target.getObject();
+    if (obj.get("V").isDictionary()) throw new Error("That signature field is already signed.");
+    obj.put("V", sig);
+    obj.put("F", 132);
+    const fr = target.getBounds() as Rect;
+    const pr = mupdf.Rect.transform(fr, toPdf);
+    const fieldRect: Rect = [Math.min(pr[0], pr[2]), Math.min(pr[1], pr[3]), Math.max(pr[0], pr[2]), Math.max(pr[1], pr[3])];
+    obj.put("AP", { N: appearance(pdf, fieldRect, identity, date, opts) });
+    const acro = pdf.getTrailer().get("Root").get("AcroForm");
+    if (acro.isDictionary()) acro.put("SigFlags", 3);
+    return;
+  }
   const widget = pdf.addObject({
     Type: "Annot",
     Subtype: "Widget",

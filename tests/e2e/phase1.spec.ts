@@ -22,7 +22,7 @@ async function pagePoint(page: Page, index: number, x: number, y: number) {
 test.describe("tabs", () => {
   test("opens several files as tabs and switches between them", async ({ page }) => {
     await open(page, "features.pdf", "sample.pdf");
-    const tabs = page.getByRole("tab");
+    const tabs = page.getByRole("tablist", { name: "Open documents" }).getByRole("tab");
     await expect(tabs).toHaveCount(2);
     await expect(page.getByRole("tab", { name: /sample\.pdf/ })).toHaveAttribute("aria-selected", "true");
     await expect(view(page).locator(".page-input__total")).toHaveText("of 5");

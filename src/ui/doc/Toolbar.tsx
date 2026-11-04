@@ -4,10 +4,8 @@ import {
   BookOpen20Regular,
   ChevronDown20Regular,
   ChevronUp20Regular,
-  Cursor20Regular,
   DocumentOnePage20Regular,
   DocumentMultiple20Regular,
-  HandLeft20Regular,
   Info20Regular,
   MoreHorizontal20Regular,
   PanelLeft20Regular,
@@ -23,7 +21,15 @@ import {
   ZoomOut20Regular,
   ColorBackground20Regular,
   Eye20Regular,
+  Save20Regular,
+  SaveEdit20Regular,
+  ArrowExport20Regular,
+  ArrowImport20Regular,
+  LayerDiagonal20Regular,
+  HandLeft20Regular,
 } from "@fluentui/react-icons";
+import { ModeSwitch } from "./ModeBar";
+import type { Mode } from "./tools";
 import { useState } from "react";
 import type { DocInfo } from "../../core/types";
 import { MenuButton } from "../components/Menu";
@@ -56,6 +62,13 @@ interface Props {
   onReadAloud: () => void;
   onPrint: () => void;
   onProperties: () => void;
+  mode: Mode;
+  onMode: (m: Mode) => void;
+  onSave: () => void;
+  onSaveAs: () => void;
+  onExportComments: () => void;
+  onImportComments: () => void;
+  onFlatten: () => void;
 }
 
 export function Toolbar(p: Props) {
@@ -67,14 +80,7 @@ export function Toolbar(p: Props) {
           <PanelLeft20Regular />
         </button>
         <div className="toolbar__divider" />
-        <div className="segmented" role="radiogroup" aria-label="Tool">
-          <button role="radio" className="icon-button" aria-label="Select text" title="Select text (V)" aria-checked={p.tool === "select"} onClick={() => p.onTool("select")}>
-            <Cursor20Regular />
-          </button>
-          <button role="radio" className="icon-button" aria-label="Hand" title="Hand: drag to scroll (H, or hold Space)" aria-checked={p.tool === "hand"} onClick={() => p.onTool("hand")}>
-            <HandLeft20Regular />
-          </button>
-        </div>
+        <ModeSwitch mode={p.mode} onMode={p.onMode} />
       </div>
 
       <div className="toolbar__center">
@@ -116,6 +122,7 @@ export function Toolbar(p: Props) {
             { label: "Night", icon: <WeatherMoon20Regular />, checked: p.readingMode === "night", onSelect: () => p.onReadingMode("night") },
             { label: "Sepia", icon: <ColorBackground20Regular />, checked: p.readingMode === "sepia", onSelect: () => p.onReadingMode("sepia") },
             { kind: "separator" },
+            { label: "Hand tool", icon: <HandLeft20Regular />, shortcut: "H", checked: p.tool === "hand", onSelect: () => p.onTool(p.tool === "hand" ? "select" : "hand") },
             { label: "Snapshot (copy area as image)", icon: <Screenshot20Regular />, shortcut: "G", onSelect: () => p.onTool("snapshot") },
             { label: "Marquee zoom", icon: <ZoomFit20Regular />, shortcut: "Z", onSelect: () => p.onTool("marquee") },
             { kind: "separator" },
@@ -134,6 +141,13 @@ export function Toolbar(p: Props) {
           label="More"
           icon={<MoreHorizontal20Regular />}
           entries={() => [
+            { label: "Save", icon: <Save20Regular />, shortcut: "Ctrl+S", onSelect: p.onSave },
+            { label: "Save as…", icon: <SaveEdit20Regular />, shortcut: "Ctrl+Shift+S", onSelect: p.onSaveAs },
+            { kind: "separator" },
+            { label: "Export comments…", icon: <ArrowExport20Regular />, onSelect: p.onExportComments },
+            { label: "Import comments…", icon: <ArrowImport20Regular />, onSelect: p.onImportComments },
+            { label: "Flatten…", icon: <LayerDiagonal20Regular />, onSelect: p.onFlatten },
+            { kind: "separator" },
             { label: "Print…", icon: <Print20Regular />, shortcut: "Ctrl+P", onSelect: p.onPrint },
             { label: "Document properties", icon: <Info20Regular />, shortcut: "Ctrl+D", onSelect: p.onProperties },
           ]}

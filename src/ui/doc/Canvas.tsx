@@ -3,11 +3,12 @@ import { caretAt, charRect, lineAt, wordAt } from "../../core/textlayer";
 import type { DocInfo, LinkInfo, Rect, SearchHit, ViewRotation } from "../../core/types";
 import { rotatedSize, toPage, toView } from "../geometry";
 import { GAP, layoutPages, pagesInRange, rowAt, type Layout, type LayoutMode } from "../layout";
-import type { DocData } from "./docData";
+import { useDocData, type DocData } from "./docData";
+import { MARKUP_TOOLS, type AnnotTool } from "./tools";
 import { PageView, type PageOverlay } from "./PageView";
 import { selectionRects, type TextSelection } from "./selection";
 
-export type Tool = "select" | "hand" | "snapshot" | "marquee";
+export type Tool = "select" | "hand" | "snapshot" | "marquee" | AnnotTool;
 export type ReadingMode = "normal" | "night" | "sepia";
 
 export interface Dest {
@@ -50,6 +51,11 @@ interface Props {
   onAreaDone: (tool: "snapshot" | "marquee", page: number, rect: Rect) => void;
   onContextMenu: (e: React.MouseEvent, page: number | null) => void;
   onZoomStep: (dir: 1 | -1) => void;
+  /** Annotation and form layers drawn over each mounted page. */
+  renderOverlay?: (page: number, scale: number) => React.ReactNode;
+  /** With a text markup tool, called when a drag-selection finishes. */
+  onMarkup?: () => void;
+  linksEnabled: boolean;
 }
 
 type Drag =
@@ -75,6 +81,7 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(props, ref
   const currentPageRef = useRef(0);
   const lastScroll = useRef({ left: 0, top: 0 });
 
+  useDocData(data);
   const layout = useMemo(() => layoutPages(info.pages, rotation, mode, scale, viewport.width), [info, rotation, mode, scale, viewport.width]);
 
   // Viewport size and display scaling.
@@ -295,6 +302,10 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(props, ref
       props.onSelection(null);
       return;
     }
+    if (effectiveTool !== "select" && !MARKUP_TOOLS.has(effectiveTool as AnnotTool) && effectiveTool !== "snapshot" && effectiveTool !== "marquee") {
+      // Drawing tools are handled by the page's annotation layer.
+      return;
+    }
     if (effectiveTool === "snapshot" || effectiveTool === "marquee") {
       el.setPointerCapture(e.pointerId);
       const [x, y] = hit.pt;
@@ -382,7 +393,7 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(props, ref
   const onPointerMove = (e: React.PointerEvent) => {
     lastPointer.current = { x: e.clientX, y: e.clientY };
     if (drag) return moveDrag(e.clientX, e.clientY);
-    if (effectiveTool !== "select") return;
+    if (effectiveTool !== "select" && !MARKUP_TOOLS.has(effectiveTool as AnnotTool)) return;
     // Text cursor over text, arrow elsewhere.
     const hit = hitPage(e.clientX, e.clientY);
     const layer = hit && data.textLayerNow(hit.page);
@@ -392,6 +403,11 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(props, ref
   };
 
   const onPointerUp = () => {
+    if (drag?.kind === "select" && MARKUP_TOOLS.has(effectiveTool as AnnotTool)) {
+      setDrag(null);
+      props.onMarkup?.();
+      return;
+    }
     if (drag?.kind === "area") {
       const r: Rect = [Math.min(drag.x0, drag.x1), Math.min(drag.y0, drag.y1), Math.max(drag.x0, drag.x1), Math.max(drag.y0, drag.y1)];
       if (r[2] - r[0] > 4 && r[3] - r[1] > 4) props.onAreaDone(drag.tool, drag.page, r);
@@ -483,12 +499,14 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(props, ref
               dpr={dpr}
               priority={Math.abs(i - current)}
               visible={visibleRect(i)}
-              renderVersion={renderVersion}
+              renderVersion={renderVersion * 10_000_000 + data.renderKey(i)}
               overlay={overlays.get(i) ?? { hits: [], selection: [] }}
-              showLinks={effectiveTool === "select" || effectiveTool === "hand"}
+              showLinks={props.linksEnabled && (effectiveTool === "select" || effectiveTool === "hand")}
               onLink={props.onLink}
               style={{ left: b.x, top: b.y, width: b.w, height: b.h }}
-            />
+            >
+              {props.renderOverlay?.(i, b.w / rotatedSize(info.pages[i], rotation).width)}
+            </PageView>
           );
         })}
         {areaBox && <div className={`area-box area-box--${drag?.kind === "area" ? drag.tool : ""}`} style={areaBox} />}

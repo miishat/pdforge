@@ -31,6 +31,7 @@ interface Props {
   showLinks: boolean;
   onLink: (link: LinkInfo) => void;
   style: React.CSSProperties;
+  children?: React.ReactNode;
 }
 
 export const PageView = memo(function PageView(props: Props) {
@@ -166,6 +167,7 @@ export const PageView = memo(function PageView(props: Props) {
         ))}
         {linkEls}
       </div>
+      {props.children}
     </div>
   );
 });

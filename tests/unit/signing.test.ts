@@ -78,6 +78,27 @@ describe("certificate signatures", () => {
     expect(new Set(sigs.map((s) => s.field)).size).toBe(2);
   });
 
+  it("signs into an existing empty signature field", async () => {
+    // Add an empty signature field by signing nothing: create the widget through a first signature, then a blank one.
+    const { engine, docId } = open(fixture("sample.pdf"));
+    const pdf = (engine as unknown as { docs: Map<number, { doc: mupdf.Document }> }).docs.get(docId)!.doc.asPDF()!;
+    pdf.beginOperation("add field");
+    const page = pdf.findPage(0);
+    const field = pdf.addObject({ Type: "Annot", Subtype: "Widget", FT: "Sig", T: pdf.newString("Approver"), Rect: [72, 72, 272, 132], F: 4, P: page });
+    page.put("Annots", [field]);
+    pdf.getTrailer().get("Root").put("AcroForm", { Fields: [field] });
+    pdf.endOperation();
+    const ws = engine.widgets(docId, 0);
+    expect(ws).toHaveLength(1);
+    expect(ws[0]).toMatchObject({ type: "signature", signed: false });
+    const { token } = engine.openIdentity(fixture("test-signer.p12"), "test");
+    await engine.sign(docId, token, { pageIndex: 0, fieldId: ws[0].id });
+    const after = engine.widgets(docId, 0);
+    expect(after).toHaveLength(1);
+    expect(after[0].signed).toBe(true);
+    expect((await engine.signatures(docId))[0]).toMatchObject({ status: "valid", field: "Approver" });
+  });
+
   it("writes PDF dates with a time zone", () => {
     expect(pdfDate(new Date(2026, 0, 2, 3, 4, 5))).toMatch(/^D:20260102030405[+-]\d{2}'\d{2}'$/);
   });

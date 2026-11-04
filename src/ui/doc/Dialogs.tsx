@@ -241,3 +241,88 @@ export function LinkDialog({ uri, onOpen, onClose }: { uri: string; onOpen: () =
     </Dialog>
   );
 }
+
+export function MeasureScaleDialog({ scale, onSave, onClose }: { scale: { ratio: number; unit: string }; onSave: (s: { ratio: number; unit: string }) => void; onClose: () => void }) {
+  const [ratio, setRatio] = useState(String(scale.ratio));
+  const [unit, setUnit] = useState(scale.unit);
+  const n = Number(ratio.replace(",", "."));
+  const valid = Number.isFinite(n) && n > 0;
+  return (
+    <Dialog
+      title="Measurement scale"
+      onClose={onClose}
+      width={400}
+      footer={
+        <>
+          <button className="button" onClick={onClose}>Cancel</button>
+          <button className="button button--primary" disabled={!valid} onClick={() => (onSave({ ratio: n, unit }), onClose())}>Set scale</button>
+        </>
+      }
+    >
+      <div className="scale-row">
+        <span>1 in on the page =</span>
+        <input className={`field field--inline ${valid ? "" : "field--invalid"}`} aria-label="Real-world length" value={ratio} onChange={(e) => setRatio(e.target.value)} inputMode="decimal" />
+        <select className="select" aria-label="Unit" value={unit} onChange={(e) => setUnit(e.target.value)}>
+          {["in", "ft", "yd", "mi", "mm", "cm", "m", "km"].map((u) => (
+            <option key={u} value={u}>{u}</option>
+          ))}
+        </select>
+      </div>
+      <p className="muted">For drawings, use the scale printed on the plan, for example 1 in = 10 ft.</p>
+    </Dialog>
+  );
+}
+
+export function FlattenDialog({ hasForm, onFlatten, onClose }: { hasForm: boolean; onFlatten: (what: { annotations: boolean; fields: boolean }) => void; onClose: () => void }) {
+  const [annotations, setAnnotations] = useState(true);
+  const [fields, setFields] = useState(hasForm);
+  return (
+    <Dialog
+      title="Flatten document"
+      onClose={onClose}
+      footer={
+        <>
+          <button className="button" onClick={onClose}>Cancel</button>
+          <button className="button button--danger" disabled={!annotations && !fields} onClick={() => (onFlatten({ annotations, fields }), onClose())}>Flatten</button>
+        </>
+      }
+    >
+      <p>Flattening makes comments and form entries part of the page itself. They'll look the same, but can no longer be edited, and this can't be undone.</p>
+      <label className="check">
+        <input type="checkbox" checked={annotations} onChange={(e) => setAnnotations(e.target.checked)} />
+        Comments, drawings, stamps and signatures you placed
+      </label>
+      {hasForm && (
+        <label className="check">
+          <input type="checkbox" checked={fields} onChange={(e) => setFields(e.target.checked)} />
+          Form fields
+        </label>
+      )}
+      <p className="muted">Tip: use Save As afterwards to keep the original file unchanged.</p>
+    </Dialog>
+  );
+}
+
+export function UnsavedDialog({ names, onSave, onDiscard, onCancel }: { names: string[]; onSave: () => void; onDiscard: () => void; onCancel: () => void }) {
+  const one = names.length === 1;
+  return (
+    <Dialog
+      title={one ? `Save changes to ${names[0]}?` : `Save changes to ${names.length} documents?`}
+      onClose={onCancel}
+      footer={
+        <>
+          <button className="button" onClick={onCancel}>Cancel</button>
+          <button className="button" onClick={onDiscard}>Don't save</button>
+          <button className="button button--primary" onClick={onSave} autoFocus>{one ? "Save" : "Save all"}</button>
+        </>
+      }
+    >
+      {one ? <p>Your changes will be lost if you don't save them.</p> : (
+        <>
+          <p>These documents have unsaved changes:</p>
+          <ul className="plain-list">{names.map((n) => <li key={n}>{n}</li>)}</ul>
+        </>
+      )}
+    </Dialog>
+  );
+}
