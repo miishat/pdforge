@@ -4,7 +4,7 @@ import type { DocInfo, LinkInfo, Rect, SearchHit, ViewRotation } from "../../cor
 import { rotatedSize, toPage, toView } from "../geometry";
 import { GAP, layoutPages, pagesInRange, rowAt, type Layout, type LayoutMode } from "../layout";
 import { useDocData, type DocData } from "./docData";
-import { MARKUP_TOOLS, type AnnotTool } from "./tools";
+import { SELECTION_TOOLS, type AnnotTool } from "./tools";
 import { PageView, type PageOverlay } from "./PageView";
 import { selectionRects, type TextSelection } from "./selection";
 
@@ -302,7 +302,7 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(props, ref
       props.onSelection(null);
       return;
     }
-    if (effectiveTool !== "select" && !MARKUP_TOOLS.has(effectiveTool as AnnotTool) && effectiveTool !== "snapshot" && effectiveTool !== "marquee") {
+    if (effectiveTool !== "select" && !SELECTION_TOOLS.has(effectiveTool as AnnotTool) && effectiveTool !== "snapshot" && effectiveTool !== "marquee") {
       // Drawing tools are handled by the page's annotation layer.
       return;
     }
@@ -393,7 +393,7 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(props, ref
   const onPointerMove = (e: React.PointerEvent) => {
     lastPointer.current = { x: e.clientX, y: e.clientY };
     if (drag) return moveDrag(e.clientX, e.clientY);
-    if (effectiveTool !== "select" && !MARKUP_TOOLS.has(effectiveTool as AnnotTool)) return;
+    if (effectiveTool !== "select" && !SELECTION_TOOLS.has(effectiveTool as AnnotTool)) return;
     // Text cursor over text, arrow elsewhere.
     const hit = hitPage(e.clientX, e.clientY);
     const layer = hit && data.textLayerNow(hit.page);
@@ -403,7 +403,7 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(props, ref
   };
 
   const onPointerUp = () => {
-    if (drag?.kind === "select" && MARKUP_TOOLS.has(effectiveTool as AnnotTool)) {
+    if (drag?.kind === "select" && SELECTION_TOOLS.has(effectiveTool as AnnotTool)) {
       setDrag(null);
       props.onMarkup?.();
       return;

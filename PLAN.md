@@ -58,6 +58,18 @@ The full brief is in [docs/PROMPT.md](docs/PROMPT.md); progress is tracked in [d
   the exact file bytes, which the engine keeps in sync after every save.
 - Crash recovery: the desktop app writes unsaved documents to `%LOCALAPPDATA%\com.miishat.pdforge\recovery` every 30 s.
 
+## Organising and editing (Phase 3)
+
+- Page operations use MuPDF's `rearrangePages` and graft maps, inside journal operations, so they're undoable. Any edit
+  that may change page count or size returns `pages: null`; the UI then refetches `DocInfo` and re-lays out.
+- Headers/footers, watermarks and backgrounds are separate content streams recorded in the page's `/PDForgeMarks`, so
+  they can be replaced or removed without parsing the original content. The original content is wrapped in q/Q first.
+- Text editing removes a line with a text-only redaction, then writes the new text at the same baseline: with the
+  line's own font (embedded via `addFont`, Identity-H, ToUnicode kept for search) if it has every glyph, else a
+  matching standard font. Image moves remove the image by redaction and re-add the same image XObject.
+- Redaction uses MuPDF's `applyRedactions`. Because incremental saves keep earlier revisions, the engine sets
+  `requireFullSave` after redaction or sanitising, and the next save is a full, garbage-collected rewrite.
+
 ## Key risks and mitigations
 
 | Risk | Mitigation |

@@ -17,10 +17,22 @@ import { SignatureDialog } from "./SignatureDialog";
 import { addSignature, dataUrlToBytes, loadSignatures, removeSignature, type SavedSignature } from "./signatures";
 import { SignaturesPanel, signatureSummary } from "./SignaturesPanel";
 import {
-  colorToHex, hexToColor, loadStyles, MARKUP_TOOLS, saveStyles, styleGroup, typeToTool,
+  colorToHex, EDIT_TOOLS, hexToColor, loadStyles, MARKUP_TOOLS, saveStyles, SELECTION_TOOLS, styleGroup, typeToTool,
   type AnnotTool, type MeasureScale, type Mode, type PlacePayload, type ToolStyle,
 } from "./tools";
 import { useEditor } from "./useEditor";
+import type { TextLine } from "../../core/content";
+import type { Point } from "../../core/types";
+import { saveFiles, pickFiles, type PickedFile } from "../../platform";
+import { EditLayer } from "./EditLayer";
+import {
+  ApplyRedactionsDialog, BackgroundDialog, FindRedactDialog, HeaderFooterDialog, LinkDialogEdit, SanitizeDialog, WatermarkDialog,
+  type HeaderFooterPreset,
+} from "./EditDialogs";
+import { EditBar, OrganizeBar } from "./ModeBar";
+import { CombineDialog, CropDialog, ExtractDialog, InsertPagesDialog, PageSizeDialog, ReplaceDialog, SplitDialog } from "./OrganizeDialogs";
+import { OrganizeView } from "./OrganizeView";
+import type { SplitPlan } from "../../core/pages";
 import { NotePopover } from "./NotePopover";
 import { Menu, type MenuEntry } from "../components/Menu";
 import { rotate, rotatedSize, toView } from "../geometry";
@@ -55,6 +67,10 @@ export interface DocumentViewProps {
   registerSave: (save: (() => Promise<boolean>) | null) => void;
   /** Crash-recovery key for this tab. */
   recoveryKey: string;
+  /** New page count or sizes after organising pages. */
+  onInfo: (info: DocInfo) => void;
+  /** Opens bytes as a new, unsaved tab (combined or extracted pages). */
+  onOpenNew: (name: string, bytes: Uint8Array) => void;
 }
 
 type DialogState =
@@ -65,6 +81,20 @@ type DialogState =
   | { kind: "flatten" }
   | { kind: "newSignature"; sig: "signature" | "initials"; then: boolean }
   | { kind: "cert"; field: WidgetInfo | null }
+  | { kind: "insertPages" }
+  | { kind: "extract" }
+  | { kind: "split" }
+  | { kind: "crop" }
+  | { kind: "pageSize" }
+  | { kind: "replace" }
+  | { kind: "combine"; files: PickedFile[] }
+  | { kind: "headerFooter"; preset: HeaderFooterPreset }
+  | { kind: "watermark" }
+  | { kind: "background" }
+  | { kind: "addLink"; page: number; rect: Rect }
+  | { kind: "findRedact" }
+  | { kind: "applyRedactions" }
+  | { kind: "sanitize" }
   | null;
 
 interface Sel {
@@ -73,6 +103,16 @@ interface Sel {
 }
 
 const KEEP_TOOL = new Set<AnnotTool>(["highlight", "underline", "strikeout", "squiggly", "rect", "ellipse", "line", "arrow", "polygon", "polyline", "ink", "distance", "perimeter", "area"]);
+
+function guessMime(name: string): string {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  const map: Record<string, string> = {
+    pdf: "application/pdf", txt: "text/plain", csv: "text/csv", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    zip: "application/zip", json: "application/json", xml: "application/xml",
+  };
+  return map[ext] ?? "application/octet-stream";
+}
 
 export function DocumentView(props: DocumentViewProps) {
   const { info, active } = props;
@@ -119,9 +159,29 @@ export function DocumentView(props: DocumentViewProps) {
   const [trusted, setTrusted] = useState<Set<string>>(() => new Set(load<string[]>("trustedSigners", [])));
   const [pendingCert, setPendingCert] = useState<(CertSignChoice & { field: WidgetInfo | null }) | null>(null);
   const newlyCreated = useRef(new Set<number>());
+  // Organize and Edit modes.
+  const [orgSelected, setOrgSelected] = useState<Set<number>>(() => new Set());
+  const [orgZoom, setOrgZoom] = useState(() => load("organizeZoom", 170));
+  const [editImage, setEditImage] = useState<{ page: number; index: number } | null>(null);
+  const [editLink, setEditLink] = useState<{ page: number; index: number } | null>(null);
+  const [textFont, setTextFont] = useState<{ family: "sans" | "serif" | "mono"; bold: boolean; italic: boolean }>({ family: "sans", bold: false, italic: false });
+  const [markKinds, setMarkKinds] = useState<string[]>([]);
+  const [redactCount, setRedactCount] = useState(0);
+  const infoRef = useRef(info);
+  infoRef.current = info;
 
   const showStatus = useCallback((m: string) => setStatus(m), []);
-  const editor = useEditor(data, props.onEditState, showStatus);
+  const editor = useEditor(data, props.onEditState, showStatus, async () => {
+    const next = await engine().call("info", info.docId);
+    props.onInfo(next);
+    setOrgSelected((sel) => new Set([...sel].filter((i) => i < next.pageCount)));
+  });
+  useEffect(() => save("organizeZoom", orgZoom), [orgZoom]);
+  useEffect(() => {
+    if (mode !== "edit") return;
+    engine().call("markKinds", info.docId).then(setMarkKinds, () => {});
+    engine().call("redactionMarkCount", info.docId).then(setRedactCount, () => {});
+  }, [mode, info.docId, data.version]);
 
   useEffect(() => {
     if (!author) void userName().then((n) => setAuthor(n));
@@ -336,7 +396,16 @@ export function DocumentView(props: DocumentViewProps) {
   }, [info.docId]);
 
   const setMode = useCallback((m: Mode) => {
-    setModeState(m);
+    setModeState((prev) => {
+      if (prev === "organize" && m !== "organize") {
+        const first = [...orgSelectedRef.current].sort((a, b) => a - b)[0];
+        if (first != null) setTimeout(() => canvas.current?.scrollTo({ page: first }), 0);
+      }
+      if (m === "organize") setOrgSelected(new Set([currentRef.current]));
+      return m;
+    });
+    setEditImage(null);
+    setEditLink(null);
     setTool("select");
     setPlace(null);
     setSelected(null);
@@ -344,6 +413,8 @@ export function DocumentView(props: DocumentViewProps) {
     setPendingCert(null);
   }, []);
 
+  const orgSelectedRef = useRef(orgSelected);
+  orgSelectedRef.current = orgSelected;
   const toolStyleKey = (t: Tool) => styleGroup(t);
   const selectedInfo: AnnotationInfo | null = selected ? data.annotsNow(selected.page)?.find((a) => a.id === selected.id) ?? null : null;
   const styleFor = (t: Tool): ToolStyle => styles[toolStyleKey(t)];
@@ -408,6 +479,20 @@ export function DocumentView(props: DocumentViewProps) {
   const applyMarkup = useCallback(
     async (t: AnnotTool, sel: TextSelection) => {
       if (isEmpty(sel)) return;
+      if (t === "redacttext") {
+        const [a0, a1] = ordered(sel);
+        const items: { page: number; quads: [number, number, number, number, number, number, number, number][] }[] = [];
+        for (let p = a0.page; p <= a1.page; p++) {
+          const layer = await data.textLayer(p);
+          const r = rangeOnPage(sel, p, layer);
+          if (!r) continue;
+          const rects = rectsForRange(layer, r[0], r[1]);
+          if (rects.length) items.push({ page: p, quads: rects.map(([x0, y0, x1, y1]) => [x0, y0, x1, y0, x0, y1, x1, y1]) });
+        }
+        if (items.length) await editor.run(() => engine().call("markForRedaction", info.docId, items));
+        setSelection(null);
+        return;
+      }
       const type = { highlight: "Highlight", underline: "Underline", strikeout: "StrikeOut", squiggly: "Squiggly" }[t as "highlight"];
       const st = styles[styleGroup(t)];
       const [s0, s1] = ordered(sel);
@@ -625,6 +710,107 @@ export function DocumentView(props: DocumentViewProps) {
     };
   }, [commentsVisible, info.docId, data.version]);
 
+  // ---- Organize ----
+
+  const orgList = [...orgSelected].sort((a, b) => a - b);
+  const insertAt = () => (orgList.length ? orgList[orgList.length - 1] + 1 : info.pageCount);
+
+  const movePagesTo = useCallback(
+    async (pages: number[], to: number) => {
+      const res = await editor.run(() => engine().call("movePages", info.docId, pages, to), { text: true });
+      if (res) {
+        const start = Array.from({ length: infoRef.current.pageCount }, (_, i) => i).filter((i) => !pages.includes(i) && i < to).length;
+        setOrgSelected(new Set(pages.map((_, k) => start + k)));
+      }
+    },
+    [editor, info.docId],
+  );
+
+  const pageOp = useCallback(
+    async (op: () => Promise<unknown>, after?: () => void) => {
+      const res = await editor.run(op as () => Promise<{ pages: null }>, { text: true });
+      if (res) after?.();
+      return res;
+    },
+    [editor],
+  );
+
+  const extract = useCallback(
+    async (pages: number[], opts: { separate: boolean; remove: boolean; open: boolean }) => {
+      const base = props.name.replace(/\.pdf$/i, "");
+      try {
+        if (opts.separate) {
+          const files = [];
+          for (const p of pages) files.push({ name: `${base} - page ${p + 1}.pdf`, bytes: await engine().call("extractPages", info.docId, [p]) });
+          const n = await saveFiles(files);
+          if (n === null) return;
+          setStatus(`Saved ${n} file${n === 1 ? "" : "s"}`);
+        } else {
+          const bytes = await engine().call("extractPages", info.docId, pages);
+          const name = `${base} (pages ${pages.length === 1 ? pages[0] + 1 : `${pages[0] + 1}-${pages[pages.length - 1] + 1}`}).pdf`;
+          if (opts.open) props.onOpenNew(name, bytes);
+          else if ((await saveAs(name, bytes)) === null) return;
+        }
+        if (opts.remove) await pageOp(() => engine().call("deletePages", info.docId, pages), () => setOrgSelected(new Set()));
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : String(err));
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [info.docId, props.name, pageOp],
+  );
+
+  const split = useCallback(
+    async (plan: SplitPlan) => {
+      try {
+        const parts = await engine().call("splitDocument", info.docId, plan);
+        const base = props.name.replace(/\.pdf$/i, "");
+        const n = await saveFiles(parts.map((p, i) => ({ name: `${base} - ${String(i + 1).padStart(2, "0")} ${p.label}.pdf`, bytes: p.bytes })));
+        if (n !== null) setStatus(`Split into ${n} files`);
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [info.docId, props.name],
+  );
+
+  const openCombine = useCallback(async () => {
+    const current = await engine().call("save", info.docId, { markSaved: false });
+    setDialog({ kind: "combine", files: [{ name: props.name, path: props.path, bytes: current }] });
+  }, [info.docId, props.name, props.path]);
+
+  // ---- Edit ----
+
+  const editLine = useCallback(
+    async (page: number, line: TextLine, text: string) => {
+      const res = await editor.run(() => engine().call("replaceLine", info.docId, page, line.index, line.text, text), { text: true });
+      if (res?.lossy) setStatus("Some characters couldn't be shown in the available fonts.");
+      else if (res?.substituted && text.trim()) setStatus(`The original font doesn't include these characters, so ${res.usedFont} was used.`);
+    },
+    [editor, info.docId],
+  );
+
+  const addPageText = useCallback(
+    async (page: number, origin: Point, text: string) => {
+      const st = styles.text;
+      const res = await editor.run(() => engine().call("addText", info.docId, page, origin, text, { size: st.fontSize, color: hexToColor(st.color), ...textFont }), { text: true });
+      if (res?.lossy) setStatus("Some characters couldn't be shown in the standard fonts.");
+    },
+    [editor, info.docId, styles.text, textFont],
+  );
+
+  const pickImage = () => pickFile({ name: "Images", extensions: ["png", "jpg", "jpeg"] });
+
+  const deleteSelectedEditItem = useCallback(async () => {
+    if (editImage) {
+      await editor.run(() => engine().call("deleteImage", info.docId, editImage.page, editImage.index));
+      setEditImage(null);
+    } else if (editLink) {
+      await editor.run(() => engine().call("deleteLink", info.docId, editLink.page, editLink.index));
+      setEditLink(null);
+    }
+  }, [editImage, editLink, editor, info.docId]);
+
   // Keyboard shortcuts for the active tab. Most follow Acrobat so habits carry over.
   useEffect(() => {
     if (!active || presenting) return;
@@ -643,6 +829,14 @@ export function DocumentView(props: DocumentViewProps) {
       if (ctrl && e.shiftKey && (k === "1" || k === "!")) return run(() => setMode("read"));
       if (ctrl && e.shiftKey && (k === "2" || k === "@")) return run(() => setMode("comment"));
       if (ctrl && e.shiftKey && (k === "3" || k === "#")) return run(() => setMode("fill"));
+      if (ctrl && e.shiftKey && (k === "4" || k === "$")) return run(() => setMode("organize"));
+      if (ctrl && e.shiftKey && (k === "5" || k === "%")) return run(() => setMode("edit"));
+      if (!typing() && mode === "organize") {
+        if ((e.key === "Delete" || e.key === "Backspace") && orgSelected.size && orgSelected.size < info.pageCount)
+          return run(() => void pageOp(() => engine().call("deletePages", info.docId, [...orgSelected]), () => setOrgSelected(new Set())));
+        if (ctrl && k === "a") return run(() => setOrgSelected(new Set(info.pages.map((_, i) => i))));
+      }
+      if (!typing() && mode === "edit" && (editImage || editLink) && (e.key === "Delete" || e.key === "Backspace")) return run(() => void deleteSelectedEditItem());
       if (!typing() && selected && (e.key === "Delete" || e.key === "Backspace") && mode !== "read") return run(() => void remove(selected.page, selected.id));
       if (!typing() && selected && mode !== "read" && e.key.startsWith("Arrow") && !e.altKey) {
         const d = e.shiftKey ? 10 : 1;
@@ -695,7 +889,7 @@ export function DocumentView(props: DocumentViewProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, presenting, zoomStep, openSearch, selection, copySelection, selectAll, search, goHistory, tool, goPage, info.pageCount, zoomMode, doRotate, startReadAloud, toggleSidebar, editor, doSave, setMode, selected, mode, remove, patch, place, pendingCert]);
+  }, [active, presenting, zoomStep, openSearch, selection, copySelection, selectAll, search, goHistory, tool, goPage, info.pageCount, zoomMode, doRotate, startReadAloud, toggleSidebar, editor, doSave, setMode, selected, mode, remove, patch, place, pendingCert, orgSelected, pageOp, editImage, editLink, deleteSelectedEditItem]);
 
   const onContextMenu = useCallback(
     (e: React.MouseEvent, _page: number | null) => {
@@ -732,12 +926,19 @@ export function DocumentView(props: DocumentViewProps) {
   );
 
   const annotTool: AnnotTool | null =
-    tool === "select" || tool === "hand" || tool === "snapshot" || tool === "marquee" || MARKUP_TOOLS.has(tool as AnnotTool) ? null : (tool as AnnotTool);
+    tool === "select" || tool === "hand" || tool === "snapshot" || tool === "marquee" || SELECTION_TOOLS.has(tool as AnnotTool) || EDIT_TOOLS.has(tool as AnnotTool)
+      ? null
+      : (tool as AnnotTool);
 
   const renderOverlay = (page: number, s: number) => {
     void data.pageAnnots(page);
     void data.pageWidgets(page);
-    const annots = data.annotsNow(page) ?? [];
+    const allAnnots = data.annotsNow(page) ?? [];
+    // In Edit mode only redaction marks are selectable; comments are left alone.
+    const annots = mode === "edit" ? allAnnots.filter((a) => a.type === "Redact") : allAnnots;
+    const editTool = mode === "edit" && EDIT_TOOLS.has(tool as AnnotTool) ? (tool as AnnotTool) : null;
+    if (editTool === "edittext") void data.pageLines(page);
+    if (editTool === "editimage") void data.pageImages(page);
     const widgets = data.widgetsNow(page) ?? [];
     const sel = selected?.page === page ? selected.id : null;
     const selInfo = sel != null ? annots.find((a) => a.id === sel) : undefined;
@@ -761,8 +962,8 @@ export function DocumentView(props: DocumentViewProps) {
           rotation={rotation}
           scale={s}
           annots={annots}
-          tool={tool === "signbox" ? "signbox" : annotTool}
-          editable={mode !== "read"}
+          tool={tool === "signbox" ? "signbox" : mode === "edit" ? (tool === "redactarea" ? null : null) : annotTool}
+          editable={mode !== "read" && !(mode === "edit" && tool !== "select")}
           notesClickable
           style={tool === "place" ? styles.text : styleFor(tool)}
           measure={measure}
@@ -780,6 +981,32 @@ export function DocumentView(props: DocumentViewProps) {
           onCommitText={commitText}
           onSignBox={(pg, rect) => pendingCert && void signWith(pendingCert, pg, rect)}
         />
+        {editTool && (
+          <EditLayer
+            page={page}
+            size={info.pages[page]}
+            rotation={rotation}
+            scale={s}
+            tool={editTool}
+            lines={data.linesNow(page) ?? []}
+            images={data.imagesNow(page) ?? []}
+            links={data.linksNow(page) ?? []}
+            selectedImage={editImage?.page === page ? editImage.index : null}
+            selectedLink={editLink?.page === page ? editLink.index : null}
+            textStyle={{ size: styles.text.fontSize, color: styles.text.color, ...textFont }}
+            onEditLine={editLine}
+            onAddText={addPageText}
+            onSelectImage={(pg, i) => setEditImage(i == null ? null : { page: pg, index: i })}
+            onMoveImage={(pg, i, r) => void editor.run(() => engine().call("moveImage", info.docId, pg, i, r)).then(() => setEditImage(null))}
+            onAddImageArea={async (pg, r) => {
+              const f = await pickImage();
+              if (f) await editor.run(() => engine().call("insertImage", info.docId, pg, r, f.bytes));
+            }}
+            onSelectLink={(pg, i) => setEditLink(i == null ? null : { page: pg, index: i })}
+            onLinkArea={(pg, r) => setDialog({ kind: "addLink", page: pg, rect: r })}
+            onRedactArea={(pg, r) => void editor.run(() => engine().call("markForRedaction", info.docId, [{ page: pg, rect: r }]))}
+          />
+        )}
         {selInfo?.type === "Text" && (
           <NotePopover
             key={selInfo.id}
@@ -817,7 +1044,7 @@ export function DocumentView(props: DocumentViewProps) {
     styleTarget: selectedInfo ? `the selected ${(ANNOT_LABELS[selectedInfo.type] ?? "comment").toLowerCase()}` : "new items",
     showColor: !(selectedInfo && selectedInfo.type === "Stamp") && tool !== "stamp",
     showFill: selectedInfo ? ["Square", "Circle", "Polygon"].includes(selectedInfo.type) : ["rect", "ellipse", "polygon", "area"].includes(tool),
-    showFont: selectedInfo ? selectedInfo.type === "FreeText" : ["text", "callout"].includes(tool) || tool === "place",
+    showFont: selectedInfo ? selectedInfo.type === "FreeText" : ["text", "callout", "addtext"].includes(tool) || tool === "place",
     showWidth: selectedInfo ? ["Square", "Circle", "Line", "Polygon", "PolyLine", "Ink"].includes(selectedInfo.type) : ["rect", "ellipse", "line", "arrow", "polygon", "polyline", "ink", "distance", "perimeter", "area"].includes(tool),
     onStyle: changeStyle,
     onDeleteSelected: deleteSelected,
@@ -884,6 +1111,77 @@ export function DocumentView(props: DocumentViewProps) {
           onClearForm={() => void editor.run(() => engine().call("resetForm", info.docId))}
         />
       )}
+      {mode === "organize" && (
+        <OrganizeBar
+          selected={orgSelected.size}
+          pageCount={info.pageCount}
+          canUndo={editor.state.canUndo}
+          canRedo={editor.state.canRedo}
+          undoLabel={editor.state.undoLabel}
+          redoLabel={editor.state.redoLabel}
+          onUndo={() => void editor.undo()}
+          onRedo={() => void editor.redo()}
+          onInsertBlank={() => {
+            const ref = info.pages[orgList[orgList.length - 1] ?? 0] ?? { width: 612, height: 792 };
+            const at = insertAt();
+            void pageOp(() => engine().call("insertBlankPage", info.docId, at, [ref.width, ref.height]), () => setOrgSelected(new Set([at])));
+          }}
+          onInsertFile={() => setDialog({ kind: "insertPages" })}
+          onInsertImage={async () => {
+            const files = await pickFiles({ name: "Images", extensions: ["png", "jpg", "jpeg"] });
+            let at = insertAt();
+            for (const f of files) {
+              const pos = at++;
+              await pageOp(() => engine().call("insertImagePage", info.docId, pos, f.bytes));
+            }
+          }}
+          onRotate={(by) => void pageOp(() => engine().call("rotatePages", info.docId, orgList, by))}
+          onDelete={() => void pageOp(() => engine().call("deletePages", info.docId, orgList), () => setOrgSelected(new Set()))}
+          onDuplicate={() => void pageOp(() => engine().call("duplicatePages", info.docId, orgList))}
+          onExtract={() => setDialog({ kind: "extract" })}
+          onReplace={() => setDialog({ kind: "replace" })}
+          onSplit={() => setDialog({ kind: "split" })}
+          onCrop={() => setDialog({ kind: "crop" })}
+          onPageSize={() => setDialog({ kind: "pageSize" })}
+          onCombine={() => void openCombine()}
+          onSelectAll={() => setOrgSelected(new Set(info.pages.map((_, i) => i)))}
+          zoom={orgZoom}
+          onZoom={setOrgZoom}
+        />
+      )}
+      {mode === "edit" && (
+        <EditBar
+          {...barCommon}
+          markKinds={markKinds}
+          redactions={redactCount}
+          imageSelected={!!editImage}
+          linkSelected={!!editLink}
+          textStyle={textFont}
+          onTextStyle={(st) => setTextFont((f) => ({ ...f, ...st }))}
+          onReplaceImage={async () => {
+            const f = await pickImage();
+            if (f && editImage) {
+              await editor.run(() => engine().call("replaceImage", info.docId, editImage.page, editImage.index, f.bytes));
+              setEditImage(null);
+            }
+          }}
+          onDeleteImage={() => void deleteSelectedEditItem()}
+          onDeleteLink={() => void deleteSelectedEditItem()}
+          onHeaderFooter={(preset) => setDialog({ kind: "headerFooter", preset })}
+          onWatermark={() => setDialog({ kind: "watermark" })}
+          onBackground={() => setDialog({ kind: "background" })}
+          onRemoveMarks={(k) => void editor.run(() => engine().call("removeMarks", info.docId, k), { text: true })}
+          onFindRedact={() => setDialog({ kind: "findRedact" })}
+          onApplyRedactions={() => setDialog({ kind: "applyRedactions" })}
+          onSanitize={() => setDialog({ kind: "sanitize" })}
+        />
+      )}
+      {mode === "edit" && redactCount > 0 && (
+        <div className="infobar infobar--bad" role="status">
+          {redactCount} area{redactCount === 1 ? " is" : "s are"} marked for redaction. Nothing is removed until you apply them.
+          <button className="link-button" onClick={() => setDialog({ kind: "applyRedactions" })}>Apply redactions…</button>
+        </div>
+      )}
       {formSummary.fieldCount > 0 && mode === "read" && (
         <div className="infobar" role="status">
           This document has fillable form fields.
@@ -918,6 +1216,23 @@ export function DocumentView(props: DocumentViewProps) {
             onSelectHit={search.select}
             onSaveAttachment={saveAttachment}
             onToggleLayer={toggleLayer}
+            data={data}
+            onSetOutline={async (nodes) => {
+              const r = await editor.run(() => engine().call("setOutline", info.docId, nodes));
+              if (r) setOutline(await engine().call("outline", info.docId));
+            }}
+            suggestBookmarkTitle={async () => (selection && !isEmpty(selection) ? (await selectionText(selection, data)).split("\n")[0].slice(0, 80) : null)}
+            onAddAttachment={async () => {
+              const f = await pickFile({ name: "Any file", extensions: ["*"] });
+              if (!f) return;
+              const r = await editor.run(() => engine().call("addAttachment", info.docId, f.name, guessMime(f.name), f.bytes));
+              if (r) setAttachments(await engine().call("attachments", info.docId));
+            }}
+            onDeleteAttachment={async (name) => {
+              const r = await editor.run(() => engine().call("deleteAttachment", info.docId, name));
+              if (r) setAttachments(await engine().call("attachments", info.docId));
+            }}
+            attachmentsAlways={mode === "edit"}
             comments={
               <CommentsPanel
                 annots={allAnnots}
@@ -943,7 +1258,42 @@ export function DocumentView(props: DocumentViewProps) {
           />
         )}
         <div className="doc-view__main">
-          <Canvas
+          {mode === "organize" && (
+            <OrganizeView
+              info={info}
+              data={data}
+              selected={orgSelected}
+              onSelect={setOrgSelected}
+              onMove={(pages, to) => void movePagesTo(pages, to)}
+              onOpen={(pg) => {
+                setOrgSelected(new Set([pg]));
+                setMode("read");
+                setTimeout(() => canvas.current?.scrollTo({ page: pg }), 0);
+              }}
+              onContextMenu={(e) => {
+                setMenu({
+                  x: e.clientX,
+                  y: e.clientY,
+                  entries: [
+                    { label: "Rotate right", onSelect: () => void pageOp(() => engine().call("rotatePages", info.docId, [...orgSelectedRef.current], 90)) },
+                    { label: "Rotate left", onSelect: () => void pageOp(() => engine().call("rotatePages", info.docId, [...orgSelectedRef.current], -90)) },
+                    { label: "Duplicate", onSelect: () => void pageOp(() => engine().call("duplicatePages", info.docId, [...orgSelectedRef.current])) },
+                    { label: "Extract…", onSelect: () => setDialog({ kind: "extract" }) },
+                    { kind: "separator" },
+                    { label: "Insert blank page after", onSelect: () => {
+                      const at = Math.max(...orgSelectedRef.current) + 1;
+                      const ref = info.pages[at - 1];
+                      void pageOp(() => engine().call("insertBlankPage", info.docId, at, [ref.width, ref.height]));
+                    } },
+                    { kind: "separator" },
+                    { label: "Delete", shortcut: "Del", disabled: orgSelectedRef.current.size >= info.pageCount, onSelect: () => void pageOp(() => engine().call("deletePages", info.docId, [...orgSelectedRef.current]), () => setOrgSelected(new Set())) },
+                  ],
+                });
+              }}
+              size={orgZoom}
+            />
+          )}
+          {mode !== "organize" && <Canvas
             ref={canvas}
             info={info}
             data={data}
@@ -968,9 +1318,9 @@ export function DocumentView(props: DocumentViewProps) {
             onContextMenu={onContextMenu}
             onZoomStep={zoomStep}
             renderOverlay={renderOverlay}
-            onMarkup={() => selection && MARKUP_TOOLS.has(tool as AnnotTool) && void applyMarkup(tool as AnnotTool, selection)}
+            onMarkup={() => selection && SELECTION_TOOLS.has(tool as AnnotTool) && void applyMarkup(tool as AnnotTool, selection)}
             linksEnabled={mode === "read"}
-          />
+          />}
           {searchOpen && (
             <SearchBar
               state={search.state}
@@ -1018,7 +1368,14 @@ export function DocumentView(props: DocumentViewProps) {
       </div>
       {menu && <Menu label="Page" at={menu} entries={menu.entries} onClose={() => setMenu(null)} />}
       {dialog?.kind === "properties" && (
-        <PropertiesDialog info={info} name={props.name} path={props.path} fileSize={props.fileSize} onClose={() => setDialog(null)} />
+        <PropertiesDialog
+          info={info}
+          name={props.name}
+          path={props.path}
+          fileSize={props.fileSize}
+          onClose={() => setDialog(null)}
+          onSaveMetadata={async (fields) => void (await editor.run(() => engine().call("setMetadata", info.docId, fields)))}
+        />
       )}
       {dialog?.kind === "print" && <PrintDialog info={info} currentPage={currentPage} onClose={() => setDialog(null)} />}
       {dialog?.kind === "link" && (
@@ -1026,6 +1383,137 @@ export function DocumentView(props: DocumentViewProps) {
           uri={dialog.uri}
           onClose={() => setDialog(null)}
           onOpen={() => openExternal(dialog.uri).catch((err) => setStatus(String(err?.message ?? err)))}
+        />
+      )}
+      {dialog?.kind === "insertPages" && (
+        <InsertPagesDialog
+          count={info.pageCount}
+          at={orgList[orgList.length - 1] ?? currentPage}
+          onClose={() => setDialog(null)}
+          onInsert={async (file, pages, at, password) => {
+            try {
+              await engine().call("insertPagesFrom", info.docId, at, file.bytes.slice(), pages, password).then(async (r) => {
+                data.invalidate(null, { text: true });
+                props.onInfo(await engine().call("info", info.docId));
+                await editor.refresh();
+                setOrgSelected(new Set(Array.from({ length: r.inserted }, (_, i) => at + i)));
+              });
+              return null;
+            } catch (err) {
+              return err instanceof Error ? err.message : String(err);
+            }
+          }}
+        />
+      )}
+      {dialog?.kind === "extract" && <ExtractDialog count={info.pageCount} selected={orgList.length ? orgList : [currentPage]} onExtract={(p, o) => void extract(p, o)} onClose={() => setDialog(null)} />}
+      {dialog?.kind === "split" && <SplitDialog count={info.pageCount} hasOutline={outline.length > 0} onSplit={(plan) => void split(plan)} onClose={() => setDialog(null)} />}
+      {dialog?.kind === "crop" && (
+        <CropDialog
+          count={info.pageCount}
+          selected={mode === "organize" ? orgList : [currentPage]}
+          onCrop={(pages, m) => void pageOp(() => engine().call("cropPages", info.docId, pages, m))}
+          onCropContent={(pages) => void pageOp(() => engine().call("cropToContent", info.docId, pages))}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog?.kind === "pageSize" && <PageSizeDialog count={info.pageCount} selected={mode === "organize" ? orgList : [currentPage]} onResize={(pages, size, sc) => void pageOp(() => engine().call("resizePages", info.docId, pages, size, sc))} onClose={() => setDialog(null)} />}
+      {dialog?.kind === "replace" && (
+        <ReplaceDialog
+          selected={orgList}
+          onClose={() => setDialog(null)}
+          onReplace={async (file, src, password) => {
+            try {
+              await engine().call("replacePages", info.docId, orgList, file.bytes.slice(), src, password);
+              data.invalidate(null, { text: true });
+              props.onInfo(await engine().call("info", info.docId));
+              await editor.refresh();
+              return null;
+            } catch (err) {
+              return err instanceof Error ? err.message : String(err);
+            }
+          }}
+        />
+      )}
+      {dialog?.kind === "combine" && (
+        <CombineDialog
+          initial={dialog.files}
+          onClose={() => setDialog(null)}
+          onCombine={async (files, bookmarks) => {
+            try {
+              const bytes = await engine().call("mergeFiles", files.map((f) => ({ name: f.name, bytes: f.bytes.slice() })), bookmarks);
+              props.onOpenNew("Combined.pdf", bytes);
+              return null;
+            } catch (err) {
+              return err instanceof Error ? err.message : String(err);
+            }
+          }}
+        />
+      )}
+      {dialog?.kind === "headerFooter" && (
+        <HeaderFooterDialog
+          preset={dialog.preset}
+          count={info.pageCount}
+          selected={[currentPage]}
+          fileName={props.name}
+          onClose={() => setDialog(null)}
+          onApply={async (spec) => {
+            const r = await editor.run(() => engine().call("addHeaderFooter", info.docId, spec), { text: true });
+            if (r?.lossy) setStatus("Some characters can't be shown in the header font (Helvetica) and were replaced with \"?\".");
+          }}
+        />
+      )}
+      {dialog?.kind === "watermark" && (
+        <WatermarkDialog
+          count={info.pageCount}
+          selected={[currentPage]}
+          onClose={() => setDialog(null)}
+          onApply={async (spec) => {
+            const r = await editor.run(() => engine().call("addWatermark", info.docId, spec), { text: true });
+            if (r?.lossy) setStatus("Some characters can't be shown in the watermark font and were replaced with \"?\".");
+          }}
+        />
+      )}
+      {dialog?.kind === "background" && <BackgroundDialog count={info.pageCount} selected={[currentPage]} onClose={() => setDialog(null)} onApply={(spec) => void editor.run(() => engine().call("addBackground", info.docId, spec))} />}
+      {dialog?.kind === "addLink" && (
+        <LinkDialogEdit count={info.pageCount} onClose={() => setDialog(null)} onSave={(target) => void editor.run(() => engine().call("addLink", info.docId, dialog.page, dialog.rect, target))} />
+      )}
+      {dialog?.kind === "findRedact" && (
+        <FindRedactDialog
+          docId={info.docId}
+          onClose={() => setDialog(null)}
+          onMark={async (hits) => {
+            const items = hits.map((h) => ({ page: h.page, quads: h.rects.map(([x0, y0, x1, y1]) => [x0, y0, x1, y0, x0, y1, x1, y1] as [number, number, number, number, number, number, number, number]) }));
+            const r = await editor.run(() => engine().call("markForRedaction", info.docId, items));
+            if (r) setStatus(`Marked ${r.marked} item${r.marked === 1 ? "" : "s"} for redaction. Review them, then apply.`);
+          }}
+        />
+      )}
+      {dialog?.kind === "applyRedactions" && (
+        <ApplyRedactionsDialog
+          count={redactCount}
+          signed={!!sigs?.length}
+          onClose={() => setDialog(null)}
+          onApply={async (o) => {
+            const r = await editor.run(() => engine().call("applyRedactions", info.docId, o), { text: true });
+            if (r) {
+              search.clear();
+              setStatus("Redactions applied. Saving will rewrite the file so the removed content is gone for good.");
+            }
+          }}
+        />
+      )}
+      {dialog?.kind === "sanitize" && (
+        <SanitizeDialog
+          signed={!!sigs?.length}
+          onClose={() => setDialog(null)}
+          onApply={async (o) => {
+            const r = await editor.run(() => engine().call("sanitize", info.docId, o));
+            if (r) {
+              const parts = Object.entries(r.report).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${{ metadata: "properties", javascript: "scripts", attachments: "attachments", comments: "comments", thumbnails: "thumbnails", privateData: "private data items" }[k]}`);
+              setStatus(parts.length ? `Removed ${parts.join(", ")}. Save to finish.` : "Nothing hidden was found.");
+              engine().call("attachments", info.docId).then(setAttachments, () => {});
+            }
+          }}
         />
       )}
       {dialog?.kind === "scale" && <MeasureScaleDialog scale={measure} onSave={setMeasure} onClose={() => setDialog(null)} />}

@@ -70,10 +70,32 @@ Not verified on real Windows yet: saving over the original file, the Save/Save A
 close-window prompt (all are desktop-only paths; the browser test build downloads instead).
 
 ## Phase 3: Organize and edit
-- ⬜ Page organizer, merge, split, insert, crop, resize
-- ⬜ Headers/footers, page numbers, Bates numbering, watermarks, backgrounds
-- ⬜ Edit text and images; edit links, bookmarks, metadata, attachments
-- ⬜ True redaction with pattern presets; sanitize document
+- ✅ Organize mode (Ctrl+Shift+4): page grid with click/Ctrl/Shift selection, keyboard navigation, drag to reorder,
+  thumbnail size slider, right-click menu, double-click to open a page
+- ✅ Insert blank pages, pages from another PDF (with page range and position, password-protected files too), images as pages
+- ✅ Rotate, duplicate, delete (Del), replace pages from another file; everything undoable
+- ✅ Extract pages to a new tab or a file, or each page as its own file; optionally remove them afterwards
+- ✅ Split every N pages, by ranges ("1-3; 4-10"), or at each top-level bookmark, into a chosen folder
+- ✅ Combine files into a new document, in any order, with a bookmark per file
+- ✅ Crop by margins (in or mm) or trim to content; change page size (Letter, Legal, Tabloid, A3, A4, A5,
+  portrait/landscape) with content scaled to fit
+- ✅ Edit mode (Ctrl+Shift+5): edit a line of text in place, keeping its position, size and colour, in the original
+  embedded font when it has the needed characters (otherwise a matching standard font, with a notice)
+- ✅ Add text (sans/serif/mono, bold, italic, size, colour); add, move, resize, replace and delete images
+- ✅ Add and delete links (web, email or a page in the document)
+- ✅ Page design: header and footer (left/centre/right, page number, page count, date, file name), page numbers,
+  Bates numbering (prefix, start, digits, suffix), text or image watermark (size, rotation, opacity, behind/over),
+  background colour. Re-applying replaces; each can be removed
+- ✅ Redaction: mark text (drag over it), mark areas, or find and redact (email, phone, US SSN, card numbers with Luhn
+  check, IBAN, dates, IP addresses, or your own words/regex). Marks are reviewed first, then applied: text is removed,
+  covered image pixels blanked (or whole images removed), covered drawings removed. The next save rewrites the whole
+  file, so nothing survives in an earlier revision
+- ✅ Remove hidden information: properties/XMP metadata, scripts and launch actions, attachments, comments, private
+  application data, embedded thumbnails (with a report of what was removed)
+- ✅ Edit bookmarks (add, rename, re-point, move, indent/outdent, delete), document title/author/subject/keywords,
+  and attachments (add, remove)
+- 🟡 Not yet: editing whole paragraphs with reflow (edits are per line), editing rotated text, scanner input,
+  removing content in hidden layers, non-Latin text in headers/watermarks (standard fonts only)
 
 ## Phase 4: Transform and protect
 - ⬜ OCR (Tesseract), compress/optimize, passwords and permissions, conversions, PDF/A, repair

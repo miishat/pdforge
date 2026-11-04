@@ -16,6 +16,24 @@ export async function readPath(path: string): Promise<PickedFile> {
   return { name: baseName(path), path, bytes: new Uint8Array(buf) };
 }
 
+export async function pickFiles(filter: { name: string; extensions: string[] }): Promise<PickedFile[]> {
+  if (isDesktop) {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const paths = await open({ multiple: true, filters: [filter] });
+    if (!paths) return [];
+    return Promise.all((Array.isArray(paths) ? paths : [paths]).map(readPath));
+  }
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+    input.accept = filter.extensions.map((e) => `.${e}`).join(",");
+    input.onchange = async () => resolve(await Promise.all([...(input.files ?? [])].map(fromBrowserFile)));
+    input.oncancel = () => resolve([]);
+    input.click();
+  });
+}
+
 export async function pickPdfs(): Promise<PickedFile[]> {
   if (isDesktop) {
     const { open } = await import("@tauri-apps/plugin-dialog");
@@ -89,17 +107,35 @@ export async function saveAs(suggestedName: string, bytes: Uint8Array, filter = 
   return "";
 }
 
-/** Picks one file of any of the given extensions and returns it. */
-export async function pickFile(filter: { name: string; extensions: string[] }): Promise<PickedFile | null> {
+/**
+ * Saves several files. On the desktop the user picks a folder; in the browser each file downloads.
+ * Returns the number saved, or null if cancelled.
+ */
+export async function saveFiles(files: { name: string; bytes: Uint8Array }[]): Promise<number | null> {
   if (isDesktop) {
     const { open } = await import("@tauri-apps/plugin-dialog");
-    const path = await open({ multiple: false, filters: [filter] });
+    const dir = await open({ directory: true, multiple: false, title: "Choose a folder for the files" });
+    if (typeof dir !== "string") return null;
+    const sep = dir.includes("\\") ? "\\" : "/";
+    for (const f of files) await writePath(`${dir.replace(/[\\/]$/, "")}${sep}${f.name}`, f.bytes);
+    return files.length;
+  }
+  for (const f of files) await saveBytes(f.name, f.bytes);
+  return files.length;
+}
+
+/** Picks one file of any of the given extensions and returns it. */
+export async function pickFile(filter: { name: string; extensions: string[] }): Promise<PickedFile | null> {
+  const any = filter.extensions.includes("*");
+  if (isDesktop) {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const path = await open({ multiple: false, filters: any ? [] : [filter] });
     return typeof path === "string" ? readPath(path) : null;
   }
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = filter.extensions.map((e) => `.${e}`).join(",");
+    if (!any) input.accept = filter.extensions.map((e) => `.${e}`).join(",");
     input.onchange = async () => resolve(input.files?.[0] ? await fromBrowserFile(input.files[0]) : null);
     input.oncancel = () => resolve(null);
     input.click();

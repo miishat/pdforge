@@ -3,6 +3,7 @@ import {
   Attach20Regular,
   Bookmark20Regular,
   Certificate20Regular,
+  Delete20Regular,
   ChevronDown16Regular,
   ChevronRight16Regular,
   CommentMultiple20Regular,
@@ -14,6 +15,9 @@ import { memo, useEffect, useRef, useState } from "react";
 import { CancelledError, engine } from "../../core/client";
 import type { AttachmentInfo, DocInfo, LayerInfo, OutlineNode } from "../../core/types";
 import type { Dest } from "./Canvas";
+import type { OutlineEdit } from "../../core/content";
+import { BookmarkEditor } from "./BookmarkEditor";
+import { useDocData, type DocData } from "./docData";
 import type { SearchState } from "./useSearch";
 
 export type Panel = "thumbnails" | "outline" | "search" | "comments" | "attachments" | "layers" | "signatures";
@@ -34,6 +38,13 @@ interface Props {
   onToggleLayer: (index: number, visible: boolean) => void;
   comments: React.ReactNode;
   signatures: React.ReactNode | null;
+  data: DocData;
+  onSetOutline: (nodes: OutlineEdit[]) => void;
+  suggestBookmarkTitle: () => Promise<string | null>;
+  onAddAttachment: () => void;
+  onDeleteAttachment: (name: string) => void;
+  /** Show the attachments panel even when empty (so files can be attached). */
+  attachmentsAlways: boolean;
 }
 
 const PANELS: { id: Panel; label: string; icon: JSX.Element }[] = [
@@ -51,8 +62,7 @@ export function Sidebar(props: Props) {
   // Only offer panels that have something in them (search appears once there's a query).
   const available = PANELS.filter(
     (p) =>
-      (p.id !== "outline" || props.outline.length > 0) &&
-      (p.id !== "attachments" || props.attachments.length > 0) &&
+      (p.id !== "attachments" || props.attachments.length > 0 || props.attachmentsAlways) &&
       (p.id !== "layers" || props.layers.length > 0) &&
       (p.id !== "search" || !!props.search.query) &&
       (p.id !== "signatures" || props.signatures !== null),
@@ -80,11 +90,20 @@ export function Sidebar(props: Props) {
         <h2 className="sidebar__title">{title}</h2>
         <div className="sidebar__content">
           {shown === "thumbnails" && <Thumbnails {...props} />}
-          {shown === "outline" && <OutlineTree nodes={props.outline} onGo={props.onGo} depth={0} />}
+          {shown === "outline" && (
+            <BookmarkEditor
+              outline={props.outline}
+              currentPage={props.currentPage}
+              labels={props.info.labels}
+              onGo={props.onGo}
+              onChange={props.onSetOutline}
+              suggestTitle={props.suggestBookmarkTitle}
+            />
+          )}
           {shown === "search" && <SearchResults search={props.search} onSelect={props.onSelectHit} labels={props.info.labels} />}
           {shown === "comments" && props.comments}
           {shown === "signatures" && props.signatures}
-          {shown === "attachments" && <Attachments items={props.attachments} onSave={props.onSaveAttachment} />}
+          {shown === "attachments" && <Attachments items={props.attachments} onSave={props.onSaveAttachment} onAdd={props.onAddAttachment} onDelete={props.onDeleteAttachment} />}
           {shown === "layers" && <Layers items={props.layers} onToggle={props.onToggleLayer} />}
         </div>
       </section>
@@ -94,7 +113,8 @@ export function Sidebar(props: Props) {
 
 const THUMB_W = 112;
 
-function Thumbnails({ info, currentPage, onGo, renderVersion }: Props) {
+function Thumbnails({ info, currentPage, onGo, renderVersion, data }: Props) {
+  useDocData(data);
   const listRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState<Set<number>>(() => new Set());
 
@@ -133,7 +153,7 @@ function Thumbnails({ info, currentPage, onGo, renderVersion }: Props) {
           aria-label={`Page ${info.labels?.[i] ?? i + 1}`}
           onClick={() => onGo({ page: i })}
         >
-          <Thumb docId={info.docId} index={i} width={THUMB_W} pageWidth={size.width} aspect={size.height / size.width} active={visible.has(i)} priority={100 + Math.abs(i - currentPage)} version={renderVersion} />
+          <Thumb docId={info.docId} index={i} width={THUMB_W} pageWidth={size.width} aspect={size.height / size.width} active={visible.has(i)} priority={100 + Math.abs(i - currentPage)} version={renderVersion * 10_000_000 + data.renderKey(i) + size.width * 7 + size.height} />
           <span className="thumb__label">{info.labels?.[i] ?? i + 1}</span>
         </button>
       ))}
@@ -243,8 +263,13 @@ function SearchResults({ search, onSelect, labels }: { search: SearchState; onSe
   );
 }
 
-function Attachments({ items, onSave }: { items: AttachmentInfo[]; onSave: (name: string) => void }) {
+function Attachments({ items, onSave, onAdd, onDelete }: { items: AttachmentInfo[]; onSave: (name: string) => void; onAdd: () => void; onDelete: (name: string) => void }) {
   return (
+    <>
+    <button className="button button--small bookmarks__add" onClick={onAdd}>
+      <Attach20Regular /> Attach a file…
+    </button>
+    {!items.length && <p className="sidebar__empty">No attached files.</p>}
     <ul className="files">
       {items.map((a) => (
         <li key={a.name} className="file">
@@ -252,12 +277,18 @@ function Attachments({ items, onSave }: { items: AttachmentInfo[]; onSave: (name
             {a.name}
           </span>
           <span className="file__meta">{a.size != null ? formatBytes(a.size) : a.mimeType ?? ""}</span>
-          <button className="icon-button icon-button--sm" aria-label={`Save ${a.name}`} title="Save a copy…" onClick={() => onSave(a.name)}>
-            <ArrowDownload20Regular />
-          </button>
+          <span className="file__actions">
+            <button className="icon-button icon-button--sm" aria-label={`Save ${a.name}`} title="Save a copy…" onClick={() => onSave(a.name)}>
+              <ArrowDownload20Regular />
+            </button>
+            <button className="icon-button icon-button--sm" aria-label={`Remove ${a.name}`} title="Remove from the document" onClick={() => onDelete(a.name)}>
+              <Delete20Regular />
+            </button>
+          </span>
         </li>
       ))}
     </ul>
+    </>
   );
 }
 

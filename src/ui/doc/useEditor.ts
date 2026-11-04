@@ -9,10 +9,18 @@ const CLEAN: EditState = { canUndo: false, canRedo: false, dirty: false, undoLab
  * Runs engine edits for one document: refreshes the affected pages' caches and rendering, and keeps
  * undo/redo and unsaved-changes state current.
  */
-export function useEditor(data: DocData, onState: (s: EditState) => void, onError: (message: string) => void) {
+export function useEditor(
+  data: DocData,
+  onState: (s: EditState) => void,
+  onError: (message: string) => void,
+  /** Called after edits that may have added, removed or resized pages. */
+  onStructure?: () => Promise<void>,
+) {
   const [state, setState] = useState<EditState>(CLEAN);
   const onStateRef = useRef(onState);
   onStateRef.current = onState;
+  const onStructureRef = useRef(onStructure);
+  onStructureRef.current = onStructure;
 
   const refresh = useCallback(async () => {
     const s = await engine().call("editState", data.docId).catch(() => CLEAN);
@@ -30,6 +38,7 @@ export function useEditor(data: DocData, onState: (s: EditState) => void, onErro
     async <T extends EditResult>(op: () => Promise<T>, opts: { text?: boolean } = {}): Promise<T | null> => {
       try {
         const result = await op();
+        if (result.pages === null) await onStructureRef.current?.();
         data.invalidate(result.pages, opts);
         await refresh();
         return result;

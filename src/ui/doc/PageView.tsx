@@ -120,7 +120,7 @@ export const PageView = memo(function PageView(props: Props) {
     return () => {
       alive = false;
     };
-  }, [data, index]);
+  }, [data, index, renderVersion]);
 
   const toCss = (r: Rect) => {
     const [x0, y0, x1, y1] = rectToView(r, size, rotation, scale);

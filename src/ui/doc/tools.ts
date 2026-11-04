@@ -2,16 +2,21 @@
 import type { Color } from "../../core/types";
 import { load, save } from "../settings";
 
-export type Mode = "read" | "comment" | "fill";
+export type Mode = "read" | "comment" | "fill" | "organize" | "edit";
 
 export type AnnotTool =
   | "highlight" | "underline" | "strikeout" | "squiggly"
   | "note" | "text" | "callout"
   | "rect" | "ellipse" | "line" | "arrow" | "polygon" | "polyline" | "ink"
   | "stamp" | "distance" | "perimeter" | "area"
-  | "place" | "signbox";
+  | "place" | "signbox"
+  | "edittext" | "addtext" | "editimage" | "addimage" | "link" | "redacttext" | "redactarea";
 
 export const MARKUP_TOOLS = new Set<AnnotTool>(["highlight", "underline", "strikeout", "squiggly"]);
+/** Tools that work by selecting text (the canvas runs text selection for them). */
+export const SELECTION_TOOLS = new Set<AnnotTool>([...MARKUP_TOOLS, "redacttext"]);
+/** Edit-mode tools handled by the page's edit layer. */
+export const EDIT_TOOLS = new Set<AnnotTool>(["edittext", "addtext", "editimage", "addimage", "link", "redactarea"]);
 
 /** Tuned to read well on white paper and as highlights (which multiply with the text). */
 export const PALETTE: { name: string; hex: string }[] = [
@@ -38,7 +43,7 @@ type StyleGroup = "highlight" | "underline" | "strikeout" | "squiggly" | "note" 
 
 export function styleGroup(tool: AnnotTool | string): StyleGroup {
   if (tool === "highlight" || tool === "underline" || tool === "strikeout" || tool === "squiggly" || tool === "note") return tool;
-  if (tool === "text" || tool === "callout") return "text";
+  if (tool === "text" || tool === "callout" || tool === "addtext" || tool === "edittext") return "text";
   if (tool === "ink") return "ink";
   if (tool === "distance" || tool === "perimeter" || tool === "area") return "measure";
   return "shape";

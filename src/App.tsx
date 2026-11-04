@@ -18,7 +18,7 @@ import { useTabs, type Tab } from "./ui/useTabs";
 const SESSION = Date.now().toString(36);
 
 export function App() {
-  const { tabs, activeId, setActiveId, open, unlock, close: closeNow, cycle, setDirty, relocate } = useTabs();
+  const { tabs, activeId, setActiveId, open, unlock, close: closeNow, cycle, setDirty, relocate, setInfo } = useTabs();
   const savers = useRef(new Map<number, () => Promise<boolean>>());
   const [prompt, setPrompt] = useState<{ ids: number[]; resolve: (ok: boolean) => void } | null>(null);
   const [recoveries, setRecoveries] = useState<{ key: string; meta: RecoveryMeta }[]>([]);
@@ -254,6 +254,8 @@ export function App() {
                   else savers.current.delete(t.id);
                 }}
                 recoveryKey={`${SESSION}-${t.id}`}
+                onInfo={(info) => setInfo(t.id, info)}
+                onOpenNew={(name, bytes) => void open({ name, path: null, bytes }, 0, { recovered: true })}
               />
             );
         }

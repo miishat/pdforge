@@ -23,17 +23,22 @@ export function PropertiesDialog({
   path,
   fileSize,
   onClose,
+  onSaveMetadata,
 }: {
   info: DocInfo;
   name: string;
   path: string | null;
   fileSize: number;
   onClose: () => void;
+  onSaveMetadata: (fields: Record<"Title" | "Author" | "Subject" | "Keywords", string>) => Promise<void>;
 }) {
   const [props, setProps] = useState<DocProperties | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [edit, setEdit] = useState<Record<"Title" | "Author" | "Subject" | "Keywords", string> | null>(null);
+  const load = () => engine().call("properties", info.docId).then(setProps, (e) => setError(String(e?.message ?? e)));
   useEffect(() => {
-    engine().call("properties", info.docId).then(setProps, (e) => setError(String(e?.message ?? e)));
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [info.docId]);
 
   const size = props?.firstPageSize;
@@ -43,18 +48,51 @@ export function PropertiesDialog({
   const meta = props?.metadata ?? {};
 
   return (
-    <Dialog title="Document properties" onClose={onClose} width={560} footer={<button className="button button--primary" onClick={onClose}>Close</button>}>
+    <Dialog
+      title="Document properties"
+      onClose={onClose}
+      width={560}
+      footer={
+        edit ? (
+          <>
+            <button className="button" onClick={() => setEdit(null)}>Cancel</button>
+            <button className="button button--primary" onClick={async () => {
+              await onSaveMetadata(edit);
+              setEdit(null);
+              await load();
+            }}>Save changes</button>
+          </>
+        ) : (
+          <>
+            <button className="button" disabled={!props} onClick={() => setEdit({ Title: props?.metadata.Title ?? "", Author: props?.metadata.Author ?? "", Subject: props?.metadata.Subject ?? "", Keywords: props?.metadata.Keywords ?? "" })}>Edit description</button>
+            <button className="button button--primary" onClick={onClose}>Close</button>
+          </>
+        )
+      }
+    >
       {error && <p className="panel__error">{error}</p>}
       {!props && !error && <p className="muted">Reading document…</p>}
       {props && (
         <div className="props">
           <section>
             <h3>Description</h3>
-            <dl>
+            {edit && (
+              <div className="props-edit">
+                {(["Title", "Author", "Subject", "Keywords"] as const).map((k) => (
+                  <label key={k} className="label label--row">
+                    {k}
+                    <input className="field" value={edit[k]} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} />
+                  </label>
+                ))}
+              </div>
+            )}
+            <dl hidden={!!edit}>
               <Row k="Title" v={meta.Title} />
               <Row k="Author" v={meta.Author} />
               <Row k="Subject" v={meta.Subject} />
               <Row k="Keywords" v={meta.Keywords} />
+            </dl>
+            <dl>
               <Row k="Created" v={meta.CreationDate} />
               <Row k="Modified" v={meta.ModDate} />
               <Row k="Application" v={meta.Creator} />

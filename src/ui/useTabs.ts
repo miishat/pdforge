@@ -103,5 +103,9 @@ export function useTabs() {
     setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, path: path ?? t.path, name, recovered: false } : t)));
   }, []);
 
-  return { tabs, activeId, setActiveId, open, unlock, close, cycle, setDirty, relocate };
+  const setInfo = useCallback((id: number, info: DocInfo) => {
+    setTabs((ts) => ts.map((t) => (t.id === id && t.state.kind === "ready" ? { ...t, state: { kind: "ready", info } } : t)));
+  }, []);
+
+  return { tabs, activeId, setActiveId, open, unlock, close, cycle, setDirty, relocate, setInfo };
 }

@@ -51,7 +51,7 @@ test.describe("sidebar", () => {
     await open(page, "features.pdf");
     await page.getByRole("button", { name: "Sidebar" }).click();
     await page.getByRole("tab", { name: "Bookmarks" }).click();
-    await page.getByRole("button", { name: "Chapter 2: Rivers" }).click();
+    await page.getByRole("button", { name: "Chapter 2: Rivers", exact: true }).click();
     await expect(page.getByLabel("Page number")).toHaveValue("3");
   });
 
@@ -70,7 +70,7 @@ test.describe("sidebar", () => {
   test("panels without content are hidden", async ({ page }) => {
     await open(page, "sample.pdf");
     await page.keyboard.press("F4");
-    await expect(page.getByRole("tab", { name: "Bookmarks" })).toHaveCount(0);
+    // Bookmarks always shows (to add the first one); empty attachments and layers don't.
     await expect(page.getByRole("tab", { name: "Attachments" })).toHaveCount(0);
     await expect(page.getByRole("tab", { name: "Layers" })).toHaveCount(0);
   });

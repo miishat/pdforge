@@ -4,6 +4,7 @@ import { useSyncExternalStore } from "react";
 import { engine } from "../../core/client";
 import type { AnnotationInfo, LinkInfo, TextLayer } from "../../core/types";
 import type { WidgetInfo } from "../../core/forms";
+import type { ImageInfo, TextLine } from "../../core/content";
 
 export class DocData {
   private text = new Map<number, Promise<TextLayer>>();
@@ -13,6 +14,11 @@ export class DocData {
   private annotsReady = new Map<number, AnnotationInfo[]>();
   private widgets = new Map<number, Promise<WidgetInfo[]>>();
   private widgetsReady = new Map<number, WidgetInfo[]>();
+  private lines = new Map<number, Promise<TextLine[]>>();
+  private linesReady = new Map<number, TextLine[]>();
+  private images = new Map<number, Promise<ImageInfo[]>>();
+  private imagesReady = new Map<number, ImageInfo[]>();
+  private linksReady = new Map<number, LinkInfo[]>();
   private listeners = new Set<() => void>();
   /** Bumped whenever cached annotations or fields change, for subscribers. */
   version = 0;
@@ -51,10 +57,61 @@ export class DocData {
     let p = this.links.get(page);
     if (!p) {
       p = engine().call("links", this.docId, page);
-      p.catch(() => this.links.delete(page));
+      p.then(
+        (l) => {
+          this.linksReady.set(page, l);
+          this.emit();
+        },
+        () => this.links.delete(page),
+      );
       this.links.set(page, p);
     }
     return p;
+  }
+
+  linksNow(page: number): LinkInfo[] | undefined {
+    return this.linksReady.get(page);
+  }
+
+  /** Editable text lines (Edit mode). */
+  pageLines(page: number): Promise<TextLine[]> {
+    let p = this.lines.get(page);
+    if (!p) {
+      p = engine().call("textLines", this.docId, page);
+      p.then(
+        (l) => {
+          this.linesReady.set(page, l);
+          this.emit();
+        },
+        () => this.lines.delete(page),
+      );
+      this.lines.set(page, p);
+    }
+    return p;
+  }
+
+  linesNow(page: number): TextLine[] | undefined {
+    return this.linesReady.get(page);
+  }
+
+  pageImages(page: number): Promise<ImageInfo[]> {
+    let p = this.images.get(page);
+    if (!p) {
+      p = engine().call("images", this.docId, page);
+      p.then(
+        (l) => {
+          this.imagesReady.set(page, l);
+          this.emit();
+        },
+        () => this.images.delete(page),
+      );
+      this.images.set(page, p);
+    }
+    return p;
+  }
+
+  imagesNow(page: number): ImageInfo[] | undefined {
+    return this.imagesReady.get(page);
   }
 
   pageAnnots(page: number): Promise<AnnotationInfo[]> {
@@ -104,20 +161,35 @@ export class DocData {
       this.annotsReady.clear();
       this.widgets.clear();
       this.widgetsReady.clear();
+      this.lines.clear();
+      this.linesReady.clear();
+      this.images.clear();
+      this.imagesReady.clear();
+      this.links.clear();
+      this.linksReady.clear();
       if (opts.text) {
         this.text.clear();
         this.textReady.clear();
-        this.links.clear();
       }
       this.globalVersion++;
     } else {
       for (const p of pages) {
         this.annots.delete(p);
         this.widgets.delete(p);
+        this.lines.delete(p);
+        this.images.delete(p);
+        this.links.delete(p);
+        if (opts.text) {
+          this.text.delete(p);
+          this.textReady.delete(p);
+        }
         this.pageVersions.set(p, (this.pageVersions.get(p) ?? 0) + 1);
         // Keep the stale lists until fresh ones arrive, so overlays don't flicker.
         void this.pageAnnots(p);
         void this.pageWidgets(p);
+        if (this.linesReady.has(p)) void this.pageLines(p);
+        if (this.imagesReady.has(p)) void this.pageImages(p);
+        void this.pageLinks(p);
       }
     }
     this.emit();
