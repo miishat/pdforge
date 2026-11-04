@@ -3,6 +3,19 @@
 import * as mupdf from "mupdf";
 import { addReply, createAnnotation, deleteWithReplies, exportItems, findAnnotation, importItems, listAnnotations, patchAnnotation } from "./editing";
 import { fromXfdf, toXfdf } from "./xfdf";
+import {
+  cropPages, cropToContent, deletePages, duplicatePages, extractPages, insertBlank, insertFrom, insertImagePage,
+  mergeDocuments, movePages, replacePages, resizePages, rotatePages, splitDocument, type SplitPlan,
+} from "./pages";
+import {
+  addBackground, addHeaderFooter, addWatermark, markKinds, removeMarks,
+  type BackgroundSpec, type HeaderFooterSpec, type MarkKind, type WatermarkSpec,
+} from "./stamping";
+import { applyRedactions, countRedactionMarks, markForRedaction, PRESETS, sanitize, type ApplyOptions, type SanitizeOptions, type SanitizeReport } from "./redact";
+import {
+  addAttachment, addLink, addText, deleteAttachment, deleteImage, deleteLink, insertImage, moveImage, readPage,
+  replaceImage, replaceLine, setMetadata, setOutline, type FontFamily, type ImageInfo, type OutlineEdit, type TextLine,
+} from "./content";
 import { pageWidgets, resetForm, setFieldValue, summarize, type FormSummary, type WidgetInfo } from "./forms";
 import { openIdentity, signDocument, verifySignatures, type Identity, type SignatureInfo, type SignOptions } from "./signing";
 import { buildPattern, searchLayer } from "./textlayer";
@@ -12,6 +25,9 @@ import type {
   EditResult,
   EditState,
   NewAnnotation,
+  Quad,
+  Point,
+  Color,
   AttachmentInfo,
   DocInfo,
   DocProperties,
@@ -62,6 +78,11 @@ interface OpenDoc {
   bytes: Uint8Array;
   /** Set by operations that can't be undone (e.g. flattening), so the tab still shows unsaved changes. */
   dirtyOutsideJournal?: boolean;
+  /**
+   * After redaction or sanitising, an incremental save would keep the removed content in the file's
+   * earlier revision, so the next save must rewrite the whole file.
+   */
+  requireFullSave?: boolean;
   /** Journal position at the last save; the document is dirty when the position differs. */
   savedPosition: number;
 }
@@ -420,6 +441,252 @@ export class PdfEngine {
     return this.edit(docId, "Import comments", (pdf) => importItems(pdf, items, fallbackAuthor));
   }
 
+  // ---- Page organisation. Results report pages: null because page numbering may change. ----
+
+  movePages(docId: number, pages: number[], to: number): EditResult {
+    return this.structural(docId, pages.length > 1 ? "Move pages" : "Move page", (pdf) => void movePages(pdf, pages, to));
+  }
+
+  deletePages(docId: number, pages: number[]): EditResult {
+    return this.structural(docId, pages.length > 1 ? `Delete ${pages.length} pages` : "Delete page", (pdf) => deletePages(pdf, pages));
+  }
+
+  duplicatePages(docId: number, pages: number[]): EditResult {
+    return this.structural(docId, "Duplicate pages", (pdf) => duplicatePages(pdf, pages));
+  }
+
+  rotatePages(docId: number, pages: number[], by: 90 | -90 | 180): EditResult {
+    return this.structural(docId, "Rotate pages", (pdf) => rotatePages(pdf, pages, by));
+  }
+
+  insertBlankPage(docId: number, at: number, size: [number, number]): EditResult {
+    return this.structural(docId, "Insert blank page", (pdf) => insertBlank(pdf, at, size));
+  }
+
+  insertPagesFrom(docId: number, at: number, bytes: Uint8Array, pages?: number[], password?: string): EditResult & { inserted: number } {
+    const src = openPdf(bytes, password);
+    let inserted = 0;
+    const r = this.structural(docId, "Insert pages", (pdf) => void (inserted = insertFrom(pdf, at, src, pages)));
+    return { ...r, inserted };
+  }
+
+  insertImagePage(docId: number, at: number, image: Uint8Array): EditResult {
+    return this.structural(docId, "Insert image as page", (pdf) => insertImagePage(pdf, at, image));
+  }
+
+  replacePages(docId: number, pages: number[], bytes: Uint8Array, srcPages: number[], password?: string): EditResult {
+    const src = openPdf(bytes, password);
+    return this.structural(docId, "Replace pages", (pdf) => replacePages(pdf, pages, src, srcPages));
+  }
+
+  extractPages(docId: number, pages: number[]): Uint8Array {
+    return extractPages(this.requirePdf(docId), pages);
+  }
+
+  splitDocument(docId: number, plan: SplitPlan): { label: string; bytes: Uint8Array }[] {
+    try {
+      return splitDocument(this.requirePdf(docId), plan);
+    } catch (err) {
+      throw new EngineError(err instanceof Error ? err.message : String(err), "edit-failed");
+    }
+  }
+
+  mergeFiles(files: { name: string; bytes: Uint8Array; password?: string }[], bookmarks: boolean): Uint8Array {
+    try {
+      return mergeDocuments(files, bookmarks);
+    } catch (err) {
+      throw new EngineError(err instanceof Error ? err.message : String(err), "edit-failed");
+    }
+  }
+
+  cropPages(docId: number, pages: number[], margins: { top: number; right: number; bottom: number; left: number }): EditResult {
+    return this.structural(docId, "Crop pages", (pdf) => cropPages(pdf, pages, margins));
+  }
+
+  cropToContent(docId: number, pages: number[]): EditResult {
+    return this.structural(docId, "Crop to content", (pdf) => cropToContent(pdf, pages));
+  }
+
+  resizePages(docId: number, pages: number[], size: [number, number], scaleContent: boolean): EditResult {
+    return this.structural(docId, "Change page size", (pdf) => resizePages(pdf, pages, size, scaleContent));
+  }
+
+  // ---- Content editing ----
+
+  textLines(docId: number, pageIndex: number): TextLine[] {
+    const pdf = this.requirePdf(docId);
+    return readPage(this.pdfPage(pdf, pageIndex)).lines.map((l) => l.info);
+  }
+
+  images(docId: number, pageIndex: number): ImageInfo[] {
+    const pdf = this.requirePdf(docId);
+    return readPage(this.pdfPage(pdf, pageIndex)).images.map((i) => i.info);
+  }
+
+  /** Replaces a line's text. `expected` guards against the page having changed since the line was read. */
+  replaceLine(docId: number, pageIndex: number, index: number, expected: string, text: string): EditResult & { usedFont: string; substituted: boolean; lossy: boolean } {
+    let out = { usedFont: "", substituted: false, lossy: false };
+    const r = this.edit(docId, "Edit text", (pdf) => {
+      const page = this.pdfPage(pdf, pageIndex);
+      const line = readPage(page).lines[index];
+      if (!line || line.info.text !== expected) throw new Error("The page changed; select the text again.");
+      out = replaceLine(pdf, page, line, text);
+      return { pages: [pageIndex] };
+    });
+    this.get(docId).text.delete(pageIndex);
+    return { ...r, ...out };
+  }
+
+  addText(docId: number, pageIndex: number, origin: Point, text: string, style: { size: number; color: Color; family: FontFamily; bold: boolean; italic: boolean }): EditResult & { lossy: boolean } {
+    let lossy = false;
+    const r = this.edit(docId, "Add text", (pdf) => {
+      lossy = addText(pdf, this.pdfPage(pdf, pageIndex), origin, text, style).lossy;
+      return { pages: [pageIndex] };
+    });
+    this.get(docId).text.delete(pageIndex);
+    return { ...r, lossy };
+  }
+
+  deleteImage(docId: number, pageIndex: number, index: number): EditResult {
+    return this.imageEdit(docId, pageIndex, index, "Delete image", (_pdf, page, img) => deleteImage(page, img.info.rect));
+  }
+
+  moveImage(docId: number, pageIndex: number, index: number, rect: Rect): EditResult {
+    return this.imageEdit(docId, pageIndex, index, "Move image", (pdf, page, img) => moveImage(pdf, page, img.image, img.info.rect, rect));
+  }
+
+  replaceImage(docId: number, pageIndex: number, index: number, bytes: Uint8Array): EditResult {
+    return this.imageEdit(docId, pageIndex, index, "Replace image", (pdf, page, img) => replaceImage(pdf, page, img.info.rect, bytes));
+  }
+
+  insertImage(docId: number, pageIndex: number, rect: Rect, bytes: Uint8Array): EditResult {
+    return this.edit(docId, "Add image", (pdf) => (insertImage(pdf, this.pdfPage(pdf, pageIndex), rect, bytes), { pages: [pageIndex] }));
+  }
+
+  private imageEdit(
+    docId: number,
+    pageIndex: number,
+    index: number,
+    label: string,
+    fn: (pdf: mupdf.PDFDocument, page: mupdf.PDFPage, img: { info: ImageInfo; image: mupdf.Image }) => void,
+  ): EditResult {
+    const r = this.edit(docId, label, (pdf) => {
+      const page = this.pdfPage(pdf, pageIndex);
+      const img = readPage(page).images[index];
+      if (!img) throw new Error("That image no longer exists.");
+      fn(pdf, page, img);
+      return { pages: [pageIndex] };
+    });
+    this.get(docId).text.delete(pageIndex);
+    return r;
+  }
+
+  addLink(docId: number, pageIndex: number, rect: Rect, target: { uri: string } | { page: number }): EditResult {
+    if ("uri" in target && !/^(https?:|mailto:)/i.test(target.uri)) throw new EngineError("Links can point to web pages (https://…) or email addresses (mailto:…).", "edit-failed");
+    return this.edit(docId, "Add link", (pdf) => (addLink(this.pdfPage(pdf, pageIndex), rect, target), { pages: [pageIndex] }));
+  }
+
+  deleteLink(docId: number, pageIndex: number, index: number): EditResult {
+    return this.edit(docId, "Delete link", (pdf) => (deleteLink(this.pdfPage(pdf, pageIndex), index), { pages: [pageIndex] }));
+  }
+
+  setOutline(docId: number, nodes: OutlineEdit[]): EditResult {
+    return this.edit(docId, "Edit bookmarks", (pdf) => (setOutline(pdf, nodes), { pages: [] }));
+  }
+
+  setMetadata(docId: number, fields: Partial<Record<"Title" | "Author" | "Subject" | "Keywords", string>>): EditResult {
+    return this.edit(docId, "Edit document properties", (pdf) => (setMetadata(pdf, fields), { pages: [] }));
+  }
+
+  addAttachment(docId: number, name: string, mime: string, bytes: Uint8Array): EditResult {
+    return this.edit(docId, "Attach file", (pdf) => (addAttachment(pdf, name, mime, bytes), { pages: [] }));
+  }
+
+  deleteAttachment(docId: number, name: string): EditResult {
+    return this.edit(docId, "Remove attachment", (pdf) => (deleteAttachment(pdf, name), { pages: [] }));
+  }
+
+  // ---- Redaction ----
+
+  redactionPresets(): { id: string; label: string }[] {
+    return PRESETS.map(({ id, label }) => ({ id, label }));
+  }
+
+  /** Finds text to redact: a preset (by id) or the caller's own text/regex. */
+  findForRedaction(docId: number, query: { preset?: string; text?: string; regex?: boolean; caseSensitive?: boolean }): SearchHit[] {
+    const preset = query.preset ? PRESETS.find((p) => p.id === query.preset) : undefined;
+    if (query.preset && !preset) throw new EngineError("Unknown pattern.", "bad-query");
+    const pattern = preset ? preset.pattern : query.text ?? "";
+    const hits = this.search(docId, pattern, { caseSensitive: preset ? true : !!query.caseSensitive, wholeWord: false, regex: preset ? true : !!query.regex }, 0, Infinity);
+    return preset?.validate ? hits.filter((h) => preset.validate!(h.match)) : hits;
+  }
+
+  markForRedaction(docId: number, items: { page: number; quads?: Quad[]; rect?: Rect }[], overlayText?: string): EditResult & { marked: number } {
+    let marked = 0;
+    const pages = [...new Set(items.map((i) => i.page))];
+    const r = this.edit(docId, items.length > 1 ? "Mark for redaction" : "Mark for redaction", (pdf) => {
+      for (const p of pages) marked += markForRedaction(this.pdfPage(pdf, p), items.filter((i) => i.page === p), overlayText);
+      return { pages };
+    });
+    return { ...r, marked };
+  }
+
+  redactionMarkCount(docId: number): number {
+    const pdf = this.pdf(docId);
+    return pdf ? countRedactionMarks(pdf) : 0;
+  }
+
+  /** Permanently removes marked content. The next save rewrites the file so nothing survives in older revisions. */
+  applyRedactions(docId: number, opts: ApplyOptions): EditResult {
+    const entry = this.get(docId);
+    const r = this.edit(docId, "Apply redactions", (pdf) => ({ pages: applyRedactions(pdf, opts) }));
+    entry.text.clear();
+    entry.requireFullSave = true;
+    return r;
+  }
+
+  sanitize(docId: number, opts: SanitizeOptions): EditResult & { report: SanitizeReport } {
+    const entry = this.get(docId);
+    let report!: SanitizeReport;
+    const r = this.edit(docId, "Remove hidden information", (pdf) => ((report = sanitize(pdf, opts)), { pages: null }));
+    entry.requireFullSave = true;
+    return { ...r, report };
+  }
+
+  // ---- Page marks ----
+
+  /** Returns whether some characters couldn't be shown (headers use Helvetica, Latin-1 only). */
+  addHeaderFooter(docId: number, spec: HeaderFooterSpec): EditResult & { lossy: boolean } {
+    let lossy = false;
+    const r = this.edit(docId, "Add header and footer", (pdf) => ((lossy = addHeaderFooter(pdf, spec)), { pages: spec.pages }));
+    this.get(docId).text.clear();
+    return { ...r, lossy };
+  }
+
+  addWatermark(docId: number, spec: WatermarkSpec): EditResult & { lossy: boolean } {
+    let lossy = false;
+    const r = this.edit(docId, "Add watermark", (pdf) => ((lossy = addWatermark(pdf, spec)), { pages: spec.pages }));
+    this.get(docId).text.clear();
+    return { ...r, lossy };
+  }
+
+  addBackground(docId: number, spec: BackgroundSpec): EditResult {
+    return this.edit(docId, "Add background", (pdf) => (addBackground(pdf, spec), { pages: spec.pages }));
+  }
+
+  removeMarks(docId: number, kind?: MarkKind): EditResult & { removed: number } {
+    let removed = 0;
+    const label = kind === "headerfooter" ? "Remove header and footer" : kind === "watermark" ? "Remove watermark" : kind === "background" ? "Remove background" : "Remove page marks";
+    const r = this.edit(docId, label, (pdf) => ((removed = removeMarks(pdf, kind)), { pages: null }));
+    this.get(docId).text.clear();
+    return { ...r, removed };
+  }
+
+  markKinds(docId: number): MarkKind[] {
+    const pdf = this.pdf(docId);
+    return pdf ? markKinds(pdf) : [];
+  }
+
   /** Marks a document as changed without an undo step (e.g. one restored from crash recovery). */
   markDirty(docId: number): void {
     this.get(docId).dirtyOutsideJournal = true;
@@ -461,11 +728,12 @@ export class PdfEngine {
   save(docId: number, opts: { incremental?: boolean; markSaved?: boolean } = {}): Uint8Array {
     const entry = this.get(docId);
     const pdf = this.requirePdf(docId);
-    const incremental = opts.incremental !== false && safe(() => pdf.canBeSavedIncrementally(), false);
+    const incremental = opts.incremental !== false && !entry.requireFullSave && safe(() => pdf.canBeSavedIncrementally(), false);
     const bytes = pdf.saveToBuffer(incremental ? "incremental" : "garbage=compact,compress").asUint8Array().slice();
     if (opts.markSaved !== false) {
       entry.savedPosition = safe(() => pdf.getJournal().position, 0);
       entry.dirtyOutsideJournal = false;
+      entry.requireFullSave = false;
     }
     return bytes;
   }
@@ -526,6 +794,16 @@ export class PdfEngine {
     } finally {
       page.destroy();
     }
+  }
+
+  /** A change that may renumber or resize pages: one undo step, and cached text is dropped. */
+  private structural(docId: number, label: string, fn: (pdf: mupdf.PDFDocument) => void): EditResult {
+    const r = this.edit(docId, label, (pdf) => {
+      fn(pdf);
+      return { pages: null };
+    });
+    this.get(docId).text.clear();
+    return r;
   }
 
   /** Runs a change as one undoable step. */
@@ -650,6 +928,21 @@ function safe<T>(fn: () => T, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function openPdf(bytes: Uint8Array, password?: string): mupdf.PDFDocument {
+  let doc: mupdf.Document;
+  try {
+    doc = mupdf.Document.openDocument(bytes, "application/pdf");
+  } catch (err) {
+    throw new EngineError(`That file couldn't be opened as a PDF (${errText(err)}).`, "invalid-file");
+  }
+  if (doc.needsPassword() && !(password && doc.authenticatePassword(password))) {
+    throw new EngineError("That PDF is password-protected.", "bad-password");
+  }
+  const pdf = doc.asPDF();
+  if (!pdf) throw new EngineError("That file isn't a PDF.", "invalid-file");
+  return pdf;
 }
 
 function errText(err: unknown): string {

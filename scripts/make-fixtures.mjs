@@ -135,6 +135,38 @@ writeFileSync(new URL("features.pdf", out), rich.saveToBuffer("compress").asUint
   writeFileSync(new URL("form.pdf", out), doc.saveToBuffer("").asUint8Array());
 }
 
+// Document with personal data for redaction, plus hidden data for sanitising.
+{
+  const doc = makeDoc([
+    {
+      size: letter,
+      lines: [
+        "Customer record",
+        "Contact: jane.doe@example.com, phone +1 (555) 123-4567",
+        "SSN 123-45-6789",
+        "Card 4111 1111 1111 1111 and fake 4111 1111 1111 1112",
+        "Secret project codename BLUEBIRD.",
+      ],
+    },
+    { size: letter, lines: ["Page two", "BLUEBIRD appears again here."] },
+  ]);
+  // A grey image block to redact pixels from.
+  const pix = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, 100, 100], false);
+  pix.clear(128);
+  const page = doc.findPage(0);
+  page.get("Resources").put("XObject", { Im1: doc.addImage(new mupdf.Image(pix)) });
+  const extra = doc.addStream("q 200 0 0 200 72 300 cm /Im1 Do Q", {});
+  page.put("Contents", [page.get("Contents"), extra]);
+  const S = (x) => doc.newString(x);
+  doc.getTrailer().get("Root").put("OpenAction", { S: "JavaScript", JS: S("app.alert('hello');") });
+  doc.getTrailer().get("Root").put("PieceInfo", { App: { Private: S("secret app data") } });
+  const now = new Date();
+  doc.insertEmbeddedFile("hidden.txt", doc.addEmbeddedFile("hidden.txt", "text/plain", new TextEncoder().encode("hidden attachment"), now, now));
+  doc.setMetaData("info:Author", "Jane Doe");
+  doc.setMetaData("info:Title", "Customer record");
+  writeFileSync(new URL("redact.pdf", out), doc.saveToBuffer("").asUint8Array());
+}
+
 // Self-signed test identity for signature tests (password "test"), using 3DES like older Windows exports.
 {
   const keys = forge.pki.rsa.generateKeyPair(2048);
