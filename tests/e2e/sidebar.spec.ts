@@ -72,3 +72,14 @@ test("the add-bookmark button stays on one line", async ({ page }) => {
   const h = (await add.boundingBox())!.height;
   expect(h).toBeLessThan(36);
 });
+
+test("the logo sits beside the name on the start screen and in the title bar", async ({ page }) => {
+  await page.goto("/");
+  const logo = page.locator(".start__brand svg");
+  const name = page.locator(".start__wordmark");
+  const a = (await logo.boundingBox())!;
+  const b = (await name.boundingBox())!;
+  expect(a.x + a.width).toBeLessThanOrEqual(b.x);
+  await expect(logo).toHaveCSS("position", "static");
+  await expect(logo).toHaveCSS("mix-blend-mode", "normal");
+});
