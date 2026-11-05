@@ -1,4 +1,4 @@
-import { Add16Regular, ChevronDown16Regular, ChevronRight16Regular, MoreHorizontal16Regular } from "@fluentui/react-icons";
+import { Add16Regular, ChevronDown16Regular, ChevronRight16Regular, Dismiss16Regular, MoreHorizontal16Regular, Search16Regular } from "@fluentui/react-icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { OutlineEdit } from "../../core/content";
 import type { OutlineNode } from "../../core/types";
@@ -9,6 +9,57 @@ type Node = OutlineEdit & { open?: boolean; y?: number | null };
 
 export function toEdit(nodes: OutlineNode[]): Node[] {
   return nodes.map((n) => ({ title: n.title, page: n.dest?.page ?? 0, y: n.dest?.y ?? null, open: n.open, children: toEdit(n.children) }));
+}
+
+/** Lower-cased, with accents removed, so "resume" finds "Résumé". */
+function fold(s: string): string {
+  return s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+}
+
+export interface BookmarkMatch {
+  path: Path;
+  title: string;
+  page: number;
+  y: number | null;
+  /** Titles of the bookmarks it sits under, outermost first. */
+  trail: string[];
+}
+
+/** Bookmarks whose titles contain every word of the query, in any order, in reading order. */
+export function findBookmarks(tree: Node[], query: string, limit = 300): BookmarkMatch[] {
+  const words = fold(query).split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const out: BookmarkMatch[] = [];
+  const walk = (nodes: Node[], parent: Path, trail: string[]) => {
+    for (let i = 0; i < nodes.length && out.length < limit; i++) {
+      const n = nodes[i];
+      const path = [...parent, i];
+      const t = fold(n.title);
+      if (words.every((w) => t.includes(w))) out.push({ path, title: n.title, page: n.page, y: n.y ?? null, trail });
+      if (n.children.length) walk(n.children as Node[], path, [...trail, n.title]);
+    }
+  };
+  walk(tree, [], []);
+  return out;
+}
+
+/** The title with the query's words marked. */
+function marked(title: string, query: string) {
+  const words = fold(query).split(/\s+/).filter(Boolean);
+  const f = fold(title);
+  // Folding can change lengths (e.g. combined characters); fall back to plain text then.
+  if (f.length !== title.length) return title;
+  const hit = new Array<boolean>(title.length).fill(false);
+  for (const w of words) for (let i = f.indexOf(w); i >= 0; i = f.indexOf(w, i + 1)) hit.fill(true, i, i + w.length);
+  const parts: (string | JSX.Element)[] = [];
+  let i = 0;
+  while (i < title.length) {
+    let j = i;
+    while (j < title.length && hit[j] === hit[i]) j++;
+    parts.push(hit[i] ? <mark key={i}>{title.slice(i, j)}</mark> : title.slice(i, j));
+    i = j;
+  }
+  return parts;
 }
 
 function nodeAt(tree: Node[], k: string): Node | undefined {
@@ -106,7 +157,9 @@ export const outlineOps = {
   },
 };
 
-export function BookmarkEditor({ outline, currentPage, labels, onGo, onChange, suggestTitle }: {
+export function BookmarkEditor({ outline, currentPage, labels, onGo, onChange, suggestTitle, focusFind = 0 }: {
+  /** Bumped to move the keyboard focus to the bookmark search box. */
+  focusFind?: number;
   outline: OutlineNode[];
   currentPage: number;
   labels: string[] | null;
@@ -120,6 +173,13 @@ export function BookmarkEditor({ outline, currentPage, labels, onGo, onChange, s
   const [menu, setMenu] = useState<{ x: number; y: number; path: Path } | null>(null);
   // Which bookmarks are expanded, by path. Kept here so navigating (which re-renders the tree) never collapses it.
   const [expanded, setExpanded] = useState<Map<string, boolean>>(() => new Map());
+  const [query, setQuery] = useState("");
+  const findRef = useRef<HTMLInputElement>(null);
+  const resultsRef = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    if (focusFind) findRef.current?.focus();
+  }, [focusFind]);
+  const matches = useMemo(() => findBookmarks(tree, query), [tree, query]);
   const same = (a: Path | null, b: Path) => !!a && a.length === b.length && a.every((v, i) => v === b[i]);
   const key = (path: Path) => path.join(".");
   const isOpen = (n: Node, path: Path) => expanded.get(key(path)) ?? n.open ?? false;
@@ -254,7 +314,73 @@ export function BookmarkEditor({ outline, currentPage, labels, onGo, onChange, s
         <span className="bookmarks__add-text">Add bookmark</span>
         <span className="bookmarks__add-page">p. {labels?.[currentPage] ?? currentPage + 1}</span>
       </button>
-      {tree.length ? render(tree, [], 0) : <p className="sidebar__empty">No bookmarks yet. Bookmarks let readers jump to sections.</p>}
+      {tree.length > 0 && (
+        <div className="bookmarks__find">
+          <Search16Regular className="bookmarks__find-icon" />
+          <input
+            ref={findRef}
+            type="search"
+            className="field field--compact"
+            aria-label="Find a bookmark"
+            placeholder="Find a bookmark or chapter"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && query) {
+                e.preventDefault();
+                e.stopPropagation();
+                setQuery("");
+              } else if (e.key === "Enter" && matches[0]) {
+                e.preventDefault();
+                onGo({ page: matches[0].page, y: matches[0].y });
+              } else if (e.key === "ArrowDown") {
+                e.preventDefault();
+                resultsRef.current?.querySelector<HTMLElement>("button")?.focus();
+              }
+            }}
+          />
+          {query && (
+            <button className="icon-button icon-button--xs" aria-label="Clear bookmark search" onClick={() => (setQuery(""), findRef.current?.focus())}>
+              <Dismiss16Regular />
+            </button>
+          )}
+        </div>
+      )}
+      {query.trim() ? (
+        matches.length ? (
+          <ol
+            ref={resultsRef}
+            className="bookmark-results"
+            aria-label={`${matches.length}${matches.length >= 300 ? "+" : ""} matching bookmarks`}
+            onKeyDown={(e) => {
+              const items = [...resultsRef.current!.querySelectorAll<HTMLElement>("button")];
+              const i = items.indexOf(document.activeElement as HTMLElement);
+              if (e.key === "ArrowDown") items[Math.min(items.length - 1, i + 1)]?.focus();
+              else if (e.key === "ArrowUp") (i <= 0 ? findRef.current : items[i - 1])?.focus();
+              else if (e.key === "Escape") findRef.current?.focus();
+              else return;
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+          >
+            {matches.map((m) => (
+              <li key={key(m.path)}>
+                <button className="bookmark-result" onClick={() => onGo({ page: m.page, y: m.y })} title={`${[...m.trail, m.title].join(" › ")} (page ${labels?.[m.page] ?? m.page + 1})`}>
+                  <span className="bookmark-result__title">{marked(m.title, query)}</span>
+                  <span className="bookmark-result__page">{labels?.[m.page] ?? m.page + 1}</span>
+                  {m.trail.length > 0 && <span className="bookmark-result__trail">{m.trail.join(" › ")}</span>}
+                </button>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="sidebar__empty">No bookmark matches “{query.trim()}”.</p>
+        )
+      ) : tree.length ? (
+        render(tree, [], 0)
+      ) : (
+        <p className="sidebar__empty">No bookmarks yet. Bookmarks let readers jump to sections.</p>
+      )}
       {menu && (
         <Menu
           label="Bookmark"

@@ -117,6 +117,8 @@ interface OpenDoc {
   bytes: Uint8Array;
   /** Set by operations that can't be undone (e.g. flattening), so the tab still shows unsaved changes. */
   dirtyOutsideJournal?: boolean;
+  /** Changes counted for `changeStamp`: every edit, undo, redo and change made outside the journal. */
+  outsideEdits?: number;
   /**
    * After redaction or sanitising, an incremental save would keep the removed content in the file's
    * earlier revision, so the next save must rewrite the whole file.
@@ -167,6 +169,7 @@ export class PdfEngine {
   private identities = new Map<number, Identity>();
   private nextIdentity = 1;
 
+  /** Opens a PDF. The engine keeps `bytes` (never changing them) as the file on disk, so callers shouldn't change them either. */
   open(bytes: Uint8Array): OpenResult {
     let doc: mupdf.Document;
     try {
@@ -180,7 +183,7 @@ export class PdfEngine {
     if (pdf) safe(() => pdf.enableJournal(), undefined);
     // A file with only an owner password opens without one, but its permissions can't be changed yet.
     const hasOpenPassword = doc.needsPassword();
-    this.docs.set(docId, { doc, text: new TextCache(), bytes: bytes.slice(), savedPosition: 0, ownerAccess: !isEncrypted(doc), hasOpenPassword });
+    this.docs.set(docId, { doc, text: new TextCache(), bytes, savedPosition: 0, ownerAccess: !isEncrypted(doc), hasOpenPassword });
     if (hasOpenPassword) return { status: "needs-password", docId };
     return { status: "ok", info: this.info(docId) };
   }
@@ -529,6 +532,7 @@ export class PdfEngine {
     entry.savedPosition = 0;
     // Flattening can't be undone, but the file on disk still has the fields until it's saved.
     entry.dirtyOutsideJournal = true;
+    entry.outsideEdits = (entry.outsideEdits ?? 0) + 1;
     return { pages: null };
   }
 
@@ -568,6 +572,7 @@ export class PdfEngine {
     entry.text.clear();
     entry.savedPosition = 0;
     entry.dirtyOutsideJournal = true;
+    entry.outsideEdits = (entry.outsideEdits ?? 0) + 1;
     return signed;
   }
 
@@ -847,12 +852,14 @@ export class PdfEngine {
   /** Marks a document as changed without an undo step (e.g. one restored from crash recovery). */
   markDirty(docId: number): void {
     this.get(docId).dirtyOutsideJournal = true;
+    this.get(docId).outsideEdits = (this.get(docId).outsideEdits ?? 0) + 1;
   }
 
   undo(docId: number): EditResult {
     const pdf = this.requirePdf(docId);
     if (pdf.canUndo()) pdf.undo();
     this.get(docId).text.clear();
+    this.touch(docId);
     return { pages: null };
   }
 
@@ -860,7 +867,15 @@ export class PdfEngine {
     const pdf = this.requirePdf(docId);
     if (pdf.canRedo()) pdf.redo();
     this.get(docId).text.clear();
+    this.touch(docId);
     return { pages: null };
+  }
+
+  /** Changes whenever the document's content does (an edit, undo or redo); for knowing when to write a recovery copy. */
+  changeStamp(docId: number): string {
+    const entry = this.get(docId);
+    const pos = safe(() => entry.doc.asPDF()?.getJournal().position ?? 0, 0);
+    return `${pos}:${entry.outsideEdits ?? 0}:${entry.pendingSecurity ? 1 : 0}:${entry.saveOptions ?? ""}`;
   }
 
   editState(docId: number): EditState {
@@ -949,6 +964,7 @@ export class PdfEngine {
     if (problem) throw new EngineError(problem, "edit-failed");
     entry.pendingSecurity = { kind: "encrypt", spec };
     entry.dirtyOutsideJournal = true;
+    entry.outsideEdits = (entry.outsideEdits ?? 0) + 1;
     return this.security(docId);
   }
 
@@ -959,6 +975,7 @@ export class PdfEngine {
     if (!entry.ownerAccess) throw new EngineError("Enter the permissions password first.", "bad-password");
     entry.pendingSecurity = isEncrypted(entry.doc) ? { kind: "decrypt" } : undefined;
     if (entry.pendingSecurity) entry.dirtyOutsideJournal = true;
+    entry.outsideEdits = (entry.outsideEdits ?? 0) + 1;
     return this.security(docId);
   }
 
@@ -1010,6 +1027,7 @@ export class PdfEngine {
     entry.saveOptions = "garbage=compact,clean,compress";
     entry.requireFullSave = true;
     entry.dirtyOutsideJournal = true;
+    entry.outsideEdits = (entry.outsideEdits ?? 0) + 1;
     return { wasRepaired: safe(() => pdf.wasRepaired(), false), pageCount: pdf.countPages(), brokenPages, objects: pdf.countObjects() };
   }
 
@@ -1342,11 +1360,18 @@ export class PdfEngine {
     try {
       const result = fn(pdf);
       pdf.endOperation();
+      this.touch(docId);
       return result;
     } catch (err) {
       safe(() => pdf.abandonOperation(), undefined);
       throw new EngineError(err instanceof Error ? err.message : String(err), "edit-failed");
     }
+  }
+
+  /** Counts a change to the document's content (see `changeStamp`). */
+  private touch(docId: number) {
+    const entry = this.get(docId);
+    entry.outsideEdits = (entry.outsideEdits ?? 0) + 1;
   }
 
   private requirePdf(docId: number): mupdf.PDFDocument {

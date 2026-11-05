@@ -11,7 +11,7 @@ import {
   Search20Regular,
   SlideMultiple20Regular,
 } from "@fluentui/react-icons";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { load, save } from "../settings";
 import { CancelledError, engine } from "../../core/client";
 import type { AttachmentInfo, DocInfo, LayerInfo, OutlineNode } from "../../core/types";
@@ -42,6 +42,8 @@ interface Props {
   data: DocData;
   onSetOutline: (nodes: OutlineEdit[]) => void;
   suggestBookmarkTitle: () => Promise<string | null>;
+  /** Bumped to focus the bookmark search box. */
+  focusBookmarkFind?: number;
   onAddAttachment: () => void;
   onDeleteAttachment: (name: string) => void;
   /** Show the attachments panel even when empty (so files can be attached). */
@@ -127,6 +129,7 @@ export function Sidebar(props: Props) {
               onGo={props.onGo}
               onChange={props.onSetOutline}
               suggestTitle={props.suggestBookmarkTitle}
+              focusFind={props.focusBookmarkFind}
             />
           )}
           {shown === "search" && <SearchResults search={props.search} onSelect={props.onSelectHit} labels={props.info.labels} />}
@@ -173,52 +176,93 @@ function clampWidth(w: number): number {
   return Math.round(Math.max(MIN_WIDTH, Math.min(max, Number.isFinite(w) ? w : DEFAULT_WIDTH)));
 }
 
+/** Space around each thumbnail's image: padding, the gap above the label, the label, and the gap to the next one. */
+const THUMB_EXTRA = 6 + 4 + 4 + 16 + 8;
+/** Thumbnails kept in the page above and below the visible part of the list, in px. */
+const THUMB_OVERSCAN = 600;
+
+/**
+ * Page thumbnails. Only those near the visible part of the list exist at all, so a document with
+ * tens of thousands of pages costs no more than a short one.
+ */
 function Thumbnails({ info, currentPage, onGo, renderVersion, data }: Props) {
   useDocData(data);
   const listRef = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState<Set<number>>(() => new Set());
+  const count = info.pages.length;
+  // Top of each thumbnail's slot; the last entry is the list's full height.
+  const offsets = useMemo(() => {
+    const o = new Float64Array(count + 1);
+    for (let i = 0; i < count; i++) o[i + 1] = o[i] + Math.round((THUMB_W * info.pages[i].height) / info.pages[i].width) + THUMB_EXTRA;
+    return o;
+  }, [info.pages, count]);
+  const [range, setRange] = useState<[number, number]>([0, Math.min(count, 12)]);
 
   useEffect(() => {
-    const root = listRef.current!.closest(".sidebar__content")!;
-    const io = new IntersectionObserver(
-      (entries) =>
-        setVisible((prev) => {
-          const next = new Set(prev);
-          for (const e of entries) {
-            const i = Number((e.target as HTMLElement).dataset.index);
-            if (e.isIntersecting) next.add(i);
-            else next.delete(i);
-          }
-          return next;
-        }),
-      { root, rootMargin: "400px 0px" },
-    );
-    listRef.current!.querySelectorAll<HTMLElement>(".thumb").forEach((el) => io.observe(el));
-    return () => io.disconnect();
-  }, [info]);
+    const list = listRef.current!;
+    const root = list.closest(".sidebar__content") as HTMLElement;
+    const update = () => {
+      const top = root.scrollTop - list.offsetTop;
+      const from = slotAt(offsets, top - THUMB_OVERSCAN);
+      const to = Math.min(count, slotAt(offsets, top + root.clientHeight + THUMB_OVERSCAN) + 1);
+      setRange((r) => (r[0] === from && r[1] === to ? r : [from, to]));
+    };
+    update();
+    root.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(root);
+    return () => {
+      root.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+  }, [offsets, count]);
 
   // Keep the current page's thumbnail in view as the reader scrolls.
   useEffect(() => {
-    listRef.current?.querySelector<HTMLElement>(`.thumb[data-index="${currentPage}"]`)?.scrollIntoView({ block: "nearest" });
-  }, [currentPage]);
+    const list = listRef.current;
+    const root = list?.closest(".sidebar__content") as HTMLElement | null;
+    if (!list || !root || currentPage >= count) return;
+    const top = list.offsetTop + offsets[currentPage];
+    const bottom = list.offsetTop + offsets[currentPage + 1] - 8;
+    if (top < root.scrollTop) root.scrollTop = top - 4;
+    else if (bottom > root.scrollTop + root.clientHeight) root.scrollTop = bottom - root.clientHeight + 4;
+  }, [currentPage, offsets, count]);
 
+  const items = [];
+  for (let i = range[0]; i < range[1]; i++) {
+    const size = info.pages[i];
+    items.push(
+      <button
+        key={i}
+        className="thumb"
+        data-index={i}
+        style={{ top: offsets[i], height: offsets[i + 1] - offsets[i] - 8 }}
+        aria-current={i === currentPage ? "page" : undefined}
+        aria-label={`Page ${info.labels?.[i] ?? i + 1}`}
+        onClick={() => onGo({ page: i })}
+      >
+        <Thumb docId={info.docId} index={i} width={THUMB_W} pageWidth={size.width} aspect={size.height / size.width} active priority={100 + Math.abs(i - currentPage)} version={renderVersion * 10_000_000 + data.renderKey(i) + size.width * 7 + size.height} />
+        <span className="thumb__label">{info.labels?.[i] ?? i + 1}</span>
+      </button>,
+    );
+  }
   return (
-    <div ref={listRef} className="thumbs">
-      {info.pages.map((size, i) => (
-        <button
-          key={i}
-          className="thumb"
-          data-index={i}
-          aria-current={i === currentPage ? "page" : undefined}
-          aria-label={`Page ${info.labels?.[i] ?? i + 1}`}
-          onClick={() => onGo({ page: i })}
-        >
-          <Thumb docId={info.docId} index={i} width={THUMB_W} pageWidth={size.width} aspect={size.height / size.width} active={visible.has(i)} priority={100 + Math.abs(i - currentPage)} version={renderVersion * 10_000_000 + data.renderKey(i) + size.width * 7 + size.height} />
-          <span className="thumb__label">{info.labels?.[i] ?? i + 1}</span>
-        </button>
-      ))}
+    <div ref={listRef} className="thumbs" style={{ height: offsets[count] }}>
+      {items}
     </div>
   );
+}
+
+/** The slot containing y, by binary search over the slot tops. */
+function slotAt(offsets: Float64Array, y: number): number {
+  let lo = 0;
+  let hi = offsets.length - 2;
+  if (hi < 0) return 0;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (offsets[mid] <= y) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
 }
 
 const Thumb = memo(function Thumb(p: {

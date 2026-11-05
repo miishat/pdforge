@@ -23,7 +23,9 @@ Legend: ✅ done and tested · 🟡 partial · ⬜ not started
 - ✅ Sidebar (F4): page thumbnails, bookmarks, search results, comments, attachments (save a copy), layers (show/hide).
   Empty panels are hidden. Resizable by dragging its edge or with the arrow keys (double-click resets); the width is
   remembered. Bookmarks keep their expanded state when you jump, long names wrap, and the section you're reading is
-  highlighted and revealed (sections opened only for that close again when you move on)
+  highlighted and revealed (sections opened only for that close again when you move on). Find a bookmark or chapter
+  (Ctrl+Shift+B): words in any order, case and accents ignored, each result shows the part it sits under. Thumbnails
+  exist only near the visible part of the list, so 17,000 pages cost about as much as 20
 - ✅ Full-text search (Ctrl+F, F3): match case, whole words, regex, live count, highlights, results list; runs in batches.
   Starts at the current page and wraps around. Page text is read once and kept, so later searches are near-instant;
   positions are worked out only for pages on screen. On large unchanged files, helper workers read pages in parallel
@@ -133,7 +135,7 @@ close-window prompt (all are desktop-only paths; the browser test build download
   Office import is MuPDF's (simple formatting only); passwords with commas or "=" (MuPDF option syntax)
 
 ## Phase 5: Beyond Acrobat
-- ✅ Command palette (Ctrl+K): every action (59 commands), searched by words in any order, with shortcuts shown and
+- ✅ Command palette (Ctrl+K): every action (60 commands), searched by words in any order, with shortcuts shown and
   recently used commands first
 - ✅ Fully rebindable shortcuts (Keyboard shortcuts…): click a command and press the new keys; conflicts move the
   shortcut instead of doubling it; per-command reset or reset all; reserved Windows keys refused. Saved

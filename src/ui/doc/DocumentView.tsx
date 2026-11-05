@@ -158,6 +158,7 @@ export function DocumentView(props: DocumentViewProps) {
   const [tool, setTool] = useState<Tool>("select");
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => load("sidebar.open", false));
   const [panel, setPanel] = useState<Panel>(() => load("sidebar.panel", "thumbnails"));
+  const [bookmarkFind, setBookmarkFind] = useState(0);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [currentPage, setCurrentPage] = useState(props.initialPage);
   const [selection, setSelection] = useState<TextSelection | null>(null);
@@ -663,12 +664,15 @@ export function DocumentView(props: DocumentViewProps) {
   }, [doSave]);
 
   // Crash recovery: every 30 s, keep a copy of unsaved work.
-  const lastAutosave = useRef(-1);
+  const lastAutosave = useRef("");
   useEffect(() => {
     if (!isDesktop) return;
     const t = setInterval(async () => {
-      if (!editor.state.dirty || lastAutosave.current === data.version) return;
-      lastAutosave.current = data.version;
+      if (!editor.state.dirty) return;
+      // Only write a new copy after a real change; scrolling or loading page data doesn't count.
+      const stamp = await engine().call("changeStamp", info.docId).catch(() => "");
+      if (!stamp || lastAutosave.current === stamp) return;
+      lastAutosave.current = stamp;
       try {
         const bytes = await engine().call("save", info.docId, { markSaved: false });
         await recoverySave(props.recoveryKey, { name: props.name, path: props.path, savedAt: Date.now() }, bytes);
@@ -966,6 +970,11 @@ export function DocumentView(props: DocumentViewProps) {
     "view.rotateCw": () => doRotate(90),
     "view.rotateCcw": () => doRotate(-90),
     "view.sidebar": toggleSidebar,
+    "nav.findBookmark": () => {
+      setSidebarOpen(true);
+      setPanel("outline");
+      setBookmarkFind((n) => n + 1);
+    },
     "view.present": () => setPresenting(true),
     "view.readAloud": startReadAloud,
     "nav.find": () => void openSearch(),
@@ -1371,6 +1380,7 @@ export function DocumentView(props: DocumentViewProps) {
               const r = await editor.run(() => engine().call("setOutline", info.docId, nodes));
               if (r) setOutline(await engine().call("outline", info.docId));
             }}
+            focusBookmarkFind={bookmarkFind}
             suggestBookmarkTitle={async () => (selection && !isEmpty(selection) ? (await selectionText(selection, data)).split("\n")[0].slice(0, 80) : null)}
             onAddAttachment={async () => {
               const f = await pickFile({ name: "Any file", extensions: ["*"] });

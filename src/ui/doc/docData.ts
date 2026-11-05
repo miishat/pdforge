@@ -6,6 +6,9 @@ import type { AnnotationInfo, LinkInfo, TextLayer } from "../../core/types";
 import type { WidgetInfo } from "../../core/forms";
 import type { ImageInfo, TextLine } from "../../core/content";
 
+/** Text layers kept per document; far more than fit on screen at once. */
+const TEXT_LAYERS_KEPT = 120;
+
 export class DocData {
   private text = new Map<number, Promise<TextLayer>>();
   private textReady = new Map<number, TextLayer>();
@@ -33,17 +36,42 @@ export class DocData {
     return () => this.listeners.delete(fn);
   };
 
+  private pendingEmit = false;
+
+  /**
+   * Tells subscribers the cache changed. Page data arrives in many small replies while scrolling,
+   * so the notifications are combined into one per frame rather than one per reply.
+   */
   private emit() {
     this.version++;
-    for (const fn of this.listeners) fn();
+    if (this.pendingEmit) return;
+    this.pendingEmit = true;
+    const flush = () => {
+      this.pendingEmit = false;
+      for (const fn of this.listeners) fn();
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(flush);
+    else setTimeout(flush, 0);
   }
 
   textLayer(page: number): Promise<TextLayer> {
     let p = this.text.get(page);
-    if (!p) {
-      p = engine().call("textLayer", this.docId, page);
-      p.then((l) => this.textReady.set(page, l)).catch(() => this.text.delete(page));
+    if (p) {
+      // Most recently used last, so the oldest are forgotten first.
+      this.text.delete(page);
       this.text.set(page, p);
+      return p;
+    }
+    p = engine().call("textLayer", this.docId, page);
+    p.then((l) => {
+      if (this.text.get(page) === p) this.textReady.set(page, l);
+    }).catch(() => this.text.delete(page));
+    this.text.set(page, p);
+    // A text layer holds the position of every character (about 100 KB for a full page), so keep only recent ones.
+    while (this.text.size > TEXT_LAYERS_KEPT) {
+      const oldest = this.text.keys().next().value!;
+      this.text.delete(oldest);
+      this.textReady.delete(oldest);
     }
     return p;
   }

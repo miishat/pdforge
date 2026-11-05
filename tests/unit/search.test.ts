@@ -83,3 +83,26 @@ describe("current bookmark", () => {
     expect(currentPath([], 3)).toBeNull();
   });
 });
+
+describe("rendering", () => {
+  // Drawing straight into RGBA would be quicker, but blend modes (highlights) then come out different.
+  it("draws the same pixels as MuPDF's own RGB rendering, as opaque RGBA", () => {
+    for (const [name, pageIndex, rotation] of [["features.pdf", 1, 0], ["photo.pdf", 0, 90], ["form.pdf", 0, 0]] as const) {
+      const { engine, docId } = open(name);
+      const out = engine.render({ docId, pageIndex, scale: 1.3, rotation });
+      const doc = mupdf.Document.openDocument(fixture(name), "application/pdf");
+      const page = doc.loadPage(pageIndex);
+      const m = mupdf.Matrix.concat(mupdf.Matrix.scale(1.3, 1.3), mupdf.Matrix.rotate(rotation));
+      const ref = page.toPixmap(m, mupdf.ColorSpace.DeviceRGB, false, true);
+      expect([out.width, out.height]).toEqual([ref.getWidth(), ref.getHeight()]);
+      const rgb = ref.getPixels();
+      let diff = 0;
+      let seeThrough = 0;
+      for (let i = 0, j = 0; i < out.width * out.height; i++, j += 3) {
+        if (out.pixels[i * 4] !== rgb[j] || out.pixels[i * 4 + 1] !== rgb[j + 1] || out.pixels[i * 4 + 2] !== rgb[j + 2]) diff++;
+        if (out.pixels[i * 4 + 3] !== 255) seeThrough++;
+      }
+      expect([diff, seeThrough]).toEqual([0, 0]);
+    }
+  });
+});

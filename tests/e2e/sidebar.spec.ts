@@ -83,3 +83,29 @@ test("the logo sits beside the name on the start screen and in the title bar", a
   await expect(logo).toHaveCSS("position", "static");
   await expect(logo).toHaveCSS("mix-blend-mode", "normal");
 });
+
+test("find a bookmark or chapter by name", async ({ page }) => {
+  await page.goto("/");
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /Open a PDF/ }).click()]);
+  await chooser.setFiles(fixture("chapters.pdf"));
+  await expect(view(page).locator('.page[data-index="0"] canvas.page__canvas')).toHaveAttribute("data-rendered", "true");
+  // One shortcut opens the bookmarks with the search box ready.
+  await page.keyboard.press("Control+Shift+B");
+  const find = page.getByRole("searchbox", { name: "Find a bookmark" });
+  await expect(find).toBeFocused();
+  await page.keyboard.type("chapter 1");
+  const results = page.getByRole("list", { name: /matching bookmarks/ });
+  // Chapter 1 and Chapters 10–15, each with the part it's in.
+  await expect(results.getByRole("button")).toHaveCount(7);
+  await expect(results.getByRole("button").nth(1)).toContainText("Chapter 10");
+  await expect(results.getByRole("button").nth(1)).toContainText("Part 2");
+  // Words in any order, case and accents ignored.
+  await find.fill("13 CHAPTER");
+  await expect(results.getByRole("button")).toHaveCount(1);
+  await find.press("Enter");
+  await expect(view(page).getByLabel("Page number")).toHaveValue("241");
+  await find.fill("nothing like this");
+  await expect(page.getByText(/No bookmark matches/)).toBeVisible();
+  await find.press("Escape");
+  await expect(page.getByRole("tree", { name: "Bookmarks" })).toBeVisible();
+});

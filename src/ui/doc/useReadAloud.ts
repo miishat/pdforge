@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { engine } from "../../core/client";
 import type { DocData } from "./docData";
 
 export type ReadAloudStatus = "idle" | "playing" | "paused";
@@ -50,7 +51,13 @@ export function useReadAloud(data: DocData, pageCount: number, onPage: (page: nu
         if (run.current !== my) return;
         setPage(p);
         onPage(p);
-        const text = (await data.textLayer(p)).text;
+        // Plain text is all speech needs; it's quicker to get than the text layer and isn't kept in the view's cache.
+        let text: string;
+        try {
+          text = await engine().call("plainText", data.docId, p);
+        } catch {
+          text = "";
+        }
         for (const chunk of chunkText(text)) {
           if (run.current !== my) return;
           await new Promise<void>((resolve) => {

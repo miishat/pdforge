@@ -52,6 +52,7 @@ export const COMMANDS: CommandDef[] = [
   { id: "view.readAloud", label: "Read aloud", category: "View", keys: ["Ctrl+Shift+Y"], inInput: true },
   // Navigate
   { id: "nav.find", label: "Find in document", category: "Navigate", keys: ["Ctrl+F"], inInput: true, keywords: "search" },
+  { id: "nav.findBookmark", label: "Find a bookmark or chapter", category: "Navigate", keys: ["Ctrl+Shift+B"], inInput: true, keywords: "search outline contents toc section heading" },
   { id: "nav.findNext", label: "Find next", category: "Navigate", keys: ["F3"], inInput: true },
   { id: "nav.findPrev", label: "Find previous", category: "Navigate", keys: ["Shift+F3"], inInput: true },
   { id: "nav.goto", label: "Go to page…", category: "Navigate", keys: ["Ctrl+G"], inInput: true },
