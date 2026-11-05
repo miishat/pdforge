@@ -10,6 +10,6 @@
 - MuPDF gotchas: never call `needsPassword()` after authenticating (it drops the authentication); stream reads and
   writes need the indirect object, not `.resolve()`; save options `objstms`/`clean` modify the document (use a copy).
 - OCR assets (Tesseract worker, cores, English model) are served by the Vite plugin in `vite.config.ts`, not committed.
-- Releases: `npm run release -- X.Y.Z`, then `git push origin main --follow-tags`; `.github/workflows/release.yml`
-  signs with the `TAURI_SIGNING_PRIVATE_KEY` secret (public key in `tauri.conf.json`). Never commit the private key.
+- Releases: `npm run release -- X.Y.Z`, then `git push origin main`; a new version on main makes
+  `.github/workflows/release.yml` tag, build and publish it (tag pushes are blocked from cloud sessions). It signs with the `TAURI_SIGNING_PRIVATE_KEY` secret (public key in `tauri.conf.json`). Never commit the private key.
   Everyday CI builds use `src-tauri/tauri.ci.conf.json`, which turns off updater signing.

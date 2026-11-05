@@ -171,7 +171,7 @@ close-window prompt (all are desktop-only paths; the browser test build download
   with "Update and restart", "What's new" and "Later"; unsaved changes are settled first. Updates are signed and
   PDForge refuses one whose signature doesn't match. "Check for updates…" and "Turn automatic update checks on or
   off" are in the command palette
-- ✅ Releases: `npm run release -- X.Y.Z` sets the version everywhere and tags it; pushing the tag makes the Release
-  workflow test, build, sign and publish the installer with `latest.json`
+- ✅ Releases: `npm run release -- X.Y.Z` sets the version everywhere and commits it; pushing that to main makes
+  the Release workflow test, build, sign, tag and publish the installer with `latest.json` (or run it from the Actions tab)
 - 🟡 The installer isn't code-signed (no Authenticode certificate), so browsers and SmartScreen warn on the first
   download. Updates installed by PDForge itself don't show that warning

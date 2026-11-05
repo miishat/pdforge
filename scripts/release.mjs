@@ -1,6 +1,6 @@
-// Starts a release: sets the version everywhere it's stored, commits, and tags it.
-// Usage: npm run release -- 0.2.0     (then push: git push origin main --follow-tags)
-// Pushing the tag makes the Release workflow build, sign and publish the installer and the update file.
+// Starts a release: sets the version everywhere it's stored and commits it.
+// Usage: npm run release -- 0.3.0     (then: git push origin main)
+// The new version on main makes the Release workflow build, sign, tag and publish the installer and update file.
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 
@@ -39,5 +39,4 @@ edit("src-tauri/Cargo.lock", (s) => s.replace(/(name = "pdforge"\nversion = )".*
 
 git("add", "package.json", "package-lock.json", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "src-tauri/Cargo.lock");
 git("commit", "-m", `Release ${version}`);
-git("tag", "-a", `v${version}`, "-m", `PDForge ${version}`);
-console.log(`Version ${version} committed and tagged v${version}.\nPublish it with: git push origin main --follow-tags`);
+console.log(`Version ${version} committed.\nPublish it with: git push origin main`);
