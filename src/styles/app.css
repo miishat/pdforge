@@ -1465,6 +1465,11 @@ kbd {
   background: var(--accent-soft);
   color: var(--text);
 }
+.update-progress {
+  width: 120px;
+  height: 6px;
+  accent-color: var(--accent);
+}
 .link-button {
   display: inline-flex;
   align-items: center;

@@ -37,6 +37,8 @@ export const COMMANDS: CommandDef[] = [
   { id: "window.prevTab", label: "Previous tab", category: "Window", keys: ["Ctrl+Shift+Tab"], inInput: true },
   { id: "window.split", label: "Split view: two documents side by side", category: "Window", keys: ["Ctrl+\\"], keywords: "side by side" },
   { id: "window.syncScroll", label: "Split view: synchronise scrolling", category: "Window", keys: [] },
+  { id: "window.checkUpdates", label: "Check for updates…", category: "Window", keys: [], keywords: "update upgrade new version release download install" },
+  { id: "window.autoUpdates", label: "Turn automatic update checks on or off", category: "Window", keys: [], keywords: "update upgrade settings" },
   { id: "window.shortcuts", label: "Keyboard shortcuts…", category: "Window", keys: [], keywords: "keymap rebind vim settings" },
   { id: "window.assistant", label: "Assistant…", category: "Window", keys: [], keywords: "ai summarize ask question claude" },
   // View

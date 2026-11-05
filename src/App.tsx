@@ -3,7 +3,7 @@ import { engine } from "./core/client";
 import type { DocInfo } from "./core/types";
 import {
   fromBrowserFile, isDesktop, launchFiles, onOpenFiles, onWindowCloseRequested, pickFiles, pickPdfs, readPath, recoveryClear, recoveryList,
-  recoveryRead, setWindowTitle, type PickedFile, type RecoveryMeta,
+  recoveryRead, setWindowTitle, type AvailableUpdate, type PickedFile, type RecoveryMeta,
 } from "./platform";
 import { UnsavedDialog } from "./ui/doc/Dialogs";
 import { DocumentView, type DocCommands, type ViewHandle } from "./ui/doc/DocumentView";
@@ -17,6 +17,8 @@ import { PasswordPrompt } from "./ui/PasswordPrompt";
 import { addRecent, loadRecent, removeRecent, samePath, saveRecent, updateRecent, type RecentFile } from "./ui/recent";
 import { StartScreen } from "./ui/StartScreen";
 import { TitleBar } from "./ui/TitleBar";
+import { UpdateBar } from "./ui/UpdateBar";
+import { autoUpdatesOn, setAutoUpdates, useUpdates } from "./ui/updates";
 import { useTabs, type Tab } from "./ui/useTabs";
 import { IMPORTABLE } from "./core/convert";
 import { defaultPaper } from "./ui/paper";
@@ -72,6 +74,19 @@ export function App() {
   useEffect(() => saveRecent(recent), [recent]);
 
   const [notice, setNotice] = useState<string | null>(null);
+  const [infoNote, setInfoNote] = useState<string | null>(null);
+  const updates = useUpdates();
+  const installUpdate = useCallback(
+    async (update: AvailableUpdate) => {
+      // The installer closes PDForge, so settle unsaved changes first.
+      const ids = tabsRef.current.map((t) => t.id);
+      if (!(await confirmClose(ids))) return;
+      for (const id of ids) void recoveryClear(`${SESSION}-${id}`);
+      await updates.install(update);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [updates.install],
+  );
 
   /** Lays out Office documents, web pages, text and images as a new, unsaved PDF tab. */
   const convertAndOpen = useCallback(
@@ -222,6 +237,15 @@ export function App() {
     "window.split": activeTab?.state.kind === "ready" ? toggleSplit : undefined,
     "window.syncScroll": splitOn ? () => setSyncScroll((v) => !v) : undefined,
     "window.shortcuts": () => setShortcuts(true),
+    "window.checkUpdates": isDesktop ? () => void updates.check(true) : undefined,
+    "window.autoUpdates": isDesktop
+      ? () => {
+          const on = !autoUpdatesOn();
+          setAutoUpdates(on);
+          setNotice(null);
+          setInfoNote(on ? "PDForge will check for updates on its own." : "Automatic update checks are off. Use “Check for updates…” in the command palette (Ctrl+K) any time.");
+        }
+      : undefined,
   };
   const appCommandsRef = useRef(appCommands);
   appCommandsRef.current = appCommands;
@@ -313,6 +337,13 @@ export function App() {
   return (
     <div className="app" {...browserDrop}>
       <TitleBar tabs={tabs} activeId={activeId} onActivate={setActiveId} onClose={close} onNew={openDialog} />
+      <UpdateBar state={updates.state} onInstall={(u) => void installUpdate(u)} onDismiss={updates.dismiss} onRetry={() => void updates.check(true)} />
+      {infoNote && (
+        <div className="infobar infobar--good app-notice" role="status">
+          {infoNote}
+          <button className="link-button" onClick={() => setInfoNote(null)}>Dismiss</button>
+        </div>
+      )}
       {notice && (
         <div className="infobar infobar--bad app-notice" role="alert">
           {notice}

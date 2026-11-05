@@ -164,3 +164,14 @@ close-window prompt (all are desktop-only paths; the browser test build download
 - 🟡 Not yet: tagging untagged PDFs (needs the source application), editing reading order, comparing scanned
   documents (recognise text first), JSON form suggestions from some services and local models depend on the model,
   API keys are stored in the app's settings rather than Windows Credential Manager
+
+## Updates and releases
+
+- ✅ In-app updates from GitHub Releases: a quiet check a few seconds after start (at most every 6 hours), a notice
+  with "Update and restart", "What's new" and "Later"; unsaved changes are settled first. Updates are signed and
+  PDForge refuses one whose signature doesn't match. "Check for updates…" and "Turn automatic update checks on or
+  off" are in the command palette
+- ✅ Releases: `npm run release -- X.Y.Z` sets the version everywhere and tags it; pushing the tag makes the Release
+  workflow test, build, sign and publish the installer with `latest.json`
+- 🟡 The installer isn't code-signed (no Authenticode certificate), so browsers and SmartScreen warn on the first
+  download. Updates installed by PDForge itself don't show that warning

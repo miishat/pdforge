@@ -1,0 +1,83 @@
+name: Release
+
+# Runs when a version tag is pushed (see scripts/release.mjs). Builds the Windows installer, signs it for
+# the in-app updater, and publishes a GitHub Release with the installer and latest.json, which installed
+# copies of PDForge read to find new versions.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npm test
+
+      - name: Check the tag matches the app version
+        shell: bash
+        run: |
+          app="v$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          if [ "$app" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::The tag is $GITHUB_REF_NAME but the app version is $app. Use npm run release to set both."
+            exit 1
+          fi
+
+      - name: Check the update signing key is set
+        shell: bash
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::Add the TAURI_SIGNING_PRIVATE_KEY repository secret (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          previous=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          {
+            echo "Changes in this version:"
+            echo
+            if [ -n "$previous" ]; then range="$previous..$GITHUB_REF_NAME"; else range="$GITHUB_REF_NAME"; fi
+            git log --no-merges --format='- %s' "$range" | grep -v '^- Release [0-9]' | head -60
+            echo
+            echo "Installed copies of PDForge offer this update on their own. To install by hand, download the setup .exe below."
+          } > release-notes.md
+          cat release-notes.md
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: PDForge ${{ github.ref_name }}
+          releaseBody: See the notes below.
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+
+      # Publish only once everything is uploaded, so the updater never sees a half-finished release.
+      - name: Publish the release with its notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" --notes-file release-notes.md --draft=false --latest

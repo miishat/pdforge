@@ -312,3 +312,45 @@ export async function writeInto(folder: string | null, name: string, bytes: Uint
   await saveBytes(name, bytes);
   return name;
 }
+
+// ---- Updates (GitHub Releases, signed) ----
+
+export interface AvailableUpdate {
+  version: string;
+  currentVersion: string;
+  notes: string;
+  /** Downloads, checks the signature, and runs the installer, which closes PDForge and opens the new version. */
+  install(onProgress: (done: number, total: number | null) => void): Promise<void>;
+}
+
+/** The installed version, e.g. "0.2.0". */
+export async function appVersion(): Promise<string> {
+  if (!isDesktop) return "dev";
+  const { getVersion } = await import("@tauri-apps/api/app");
+  return getVersion();
+}
+
+/** Asks GitHub Releases for a newer version. Null when up to date (or not in the desktop app). */
+export async function checkForUpdate(): Promise<AvailableUpdate | null> {
+  if (!isDesktop) return null;
+  const { check } = await import("@tauri-apps/plugin-updater");
+  const update = await check({ timeout: 20_000 });
+  if (!update) return null;
+  return {
+    version: update.version,
+    currentVersion: update.currentVersion,
+    notes: update.body ?? "",
+    async install(onProgress) {
+      let done = 0;
+      let total: number | null = null;
+      await update.downloadAndInstall((e) => {
+        if (e.event === "Started") total = e.data.contentLength ?? null;
+        else if (e.event === "Progress") done += e.data.chunkLength;
+        onProgress(done, total);
+      });
+      // On Windows the installer has already closed the app by now; elsewhere, restart into the new version.
+      const { relaunch } = await import("@tauri-apps/plugin-process");
+      await relaunch();
+    },
+  };
+}
