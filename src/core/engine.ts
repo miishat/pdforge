@@ -18,7 +18,8 @@ import {
 } from "./content";
 import { pageWidgets, resetForm, setFieldValue, summarize, type FormSummary, type WidgetInfo } from "./forms";
 import { openIdentity, signDocument, verifySignatures, type Identity, type SignatureInfo, type SignOptions } from "./signing";
-import { buildPattern, searchLayer } from "./textlayer";
+import { buildPattern, searchLayer, searchText } from "./textlayer";
+import { plainPageText } from "./plaintext";
 import {
   describeEncryption, fromEnginePermissions, securityOptions, validateSecurity,
   type PendingSecurity, type PermissionSet, type SecuritySpec,
@@ -70,6 +71,33 @@ type OutlineItems = NonNullable<ReturnType<mupdf.Document["loadOutline"]>>;
 
 const PERMISSIONS: Permission[] = ["print", "copy", "edit", "annotate", "form", "accessibility", "assemble", "print-hq"];
 const TEXT_CACHE_PAGES = 64;
+/** Plain page text kept for searching; about 1 byte a character, so this is roughly 200 MB at most. */
+const PLAIN_TEXT_BUDGET = 200_000_000;
+
+/**
+ * Recently used text layers (with character positions), plus the plain text of every page searched so far.
+ * Searching reads the plain text only; positions are worked out for the pages on screen.
+ */
+class TextCache extends Map<number, TextLayer> {
+  readonly plain = new Map<number, string>();
+  plainChars = 0;
+  /** Goes up whenever page text may have changed, so text read elsewhere from older bytes is refused. */
+  revision = 0;
+  override clear() {
+    super.clear();
+    this.plain.clear();
+    this.plainChars = 0;
+    this.revision++;
+  }
+  /** Forgets one page after it has been edited. */
+  invalidate(page: number) {
+    this.revision++;
+    this.delete(page);
+    const t = this.plain.get(page);
+    if (t !== undefined) this.plainChars -= t.length;
+    this.plain.delete(page);
+  }
+}
 
 const ANNOT_LABELS: Record<string, string> = {
   Highlight: "highlight", Underline: "underline", StrikeOut: "strikethrough", Squiggly: "squiggly underline",
@@ -84,7 +112,7 @@ function labelFor(type: string, verb: string): string {
 interface OpenDoc {
   doc: mupdf.Document;
   /** Text layers by page, in least-recently-used order. */
-  text: Map<number, TextLayer>;
+  text: TextCache;
   /** The file as it is on disk (needed for signatures, which cover exact bytes). */
   bytes: Uint8Array;
   /** Set by operations that can't be undone (e.g. flattening), so the tab still shows unsaved changes. */
@@ -152,7 +180,7 @@ export class PdfEngine {
     if (pdf) safe(() => pdf.enableJournal(), undefined);
     // A file with only an owner password opens without one, but its permissions can't be changed yet.
     const hasOpenPassword = doc.needsPassword();
-    this.docs.set(docId, { doc, text: new Map(), bytes: bytes.slice(), savedPosition: 0, ownerAccess: !isEncrypted(doc), hasOpenPassword });
+    this.docs.set(docId, { doc, text: new TextCache(), bytes: bytes.slice(), savedPosition: 0, ownerAccess: !isEncrypted(doc), hasOpenPassword });
     if (hasOpenPassword) return { status: "needs-password", docId };
     return { status: "ok", info: this.info(docId) };
   }
@@ -262,6 +290,82 @@ export class PdfEngine {
 
   pageText(docId: number, pageIndex: number): string {
     return this.textLayer(docId, pageIndex).text;
+  }
+
+  /** The page's text as searching sees it: identical to its text layer's text, but much quicker to get. */
+  plainText(docId: number, pageIndex: number): string {
+    const entry = this.get(docId);
+    const known = entry.text.get(pageIndex)?.text ?? entry.text.plain.get(pageIndex);
+    if (known !== undefined) return known;
+    if (pageIndex < 0 || pageIndex >= entry.doc.countPages()) throw new EngineError(`Page ${pageIndex + 1} doesn't exist.`, "bad-page");
+    const text = plainPageText(entry.doc, pageIndex);
+    this.keepPlain(entry, pageIndex, text);
+    return text;
+  }
+
+  private keepPlain(entry: OpenDoc, pageIndex: number, text: string) {
+    if (entry.text.plain.has(pageIndex) || entry.text.plainChars + text.length > PLAIN_TEXT_BUDGET) return;
+    entry.text.plain.set(pageIndex, text);
+    entry.text.plainChars += text.length;
+  }
+
+  /**
+   * For reading page text in parallel in helper workers: the file's bytes, when they hold exactly what's open
+   * (no changes since it was opened or saved), and how many pages still need their text read. Null otherwise.
+   */
+  textSource(docId: number): { bytes: Uint8Array; revision: number; missing: number } | null {
+    const entry = this.get(docId);
+    const pdf = entry.doc.asPDF();
+    if (!pdf || entry.hasOpenPassword) return null;
+    const unchanged =
+      !entry.dirtyOutsideJournal && !entry.requireFullSave && !entry.saveOptions && !entry.pendingSecurity &&
+      safe(() => pdf.getJournal().position, 0) === entry.savedPosition;
+    if (!unchanged) return null;
+    const missing = entry.doc.countPages() - entry.text.plain.size;
+    return { bytes: entry.bytes, revision: entry.text.revision, missing };
+  }
+
+  /**
+   * Accepts page text read by a helper worker from `textSource` bytes. Refused (false) if the document changed since,
+   * or if a spot check of the first page disagrees with what's open.
+   */
+  seedText(docId: number, revision: number, from: number, texts: string[]): boolean {
+    const entry = this.get(docId);
+    if (revision !== entry.text.revision || !texts.length) return false;
+    if (from + texts.length > entry.doc.countPages()) return false;
+    if (this.plainText(docId, from) !== texts[0]) return false;
+    texts.forEach((t, i) => this.keepPlain(entry, from + i, t));
+    return true;
+  }
+
+  /** The first page from `from` (before `to`) whose plain text hasn't been read yet, or `to`. */
+  firstUnread(docId: number, from: number, to: number): number {
+    const entry = this.get(docId);
+    const end = Math.min(to, entry.doc.countPages());
+    let p = Math.max(0, from);
+    while (p < end && (entry.text.plain.has(p) || entry.text.has(p))) p++;
+    return p;
+  }
+
+  /**
+   * Fast search for the find bar: scans pages from `from`, stopping at `to`, after `budgetMs`, or at `limit` hits.
+   * Hits carry character offsets but no rectangles; work those out from the page's text layer when it's shown.
+   */
+  find(docId: number, query: string, opts: SearchOptions, from: number, to: number, limit = 5000, budgetMs = 60, readMissing = true): { hits: SearchHit[]; next: number } {
+    const { doc } = this.get(docId);
+    const pattern = buildPattern(query, opts);
+    if (!pattern) throw new EngineError("That search pattern isn't valid.", "bad-query");
+    const hits: SearchHit[] = [];
+    // With `readMissing` off, stop at the first page whose text a helper worker hasn't delivered yet.
+    const end = readMissing ? Math.min(to, doc.countPages()) : this.firstUnread(docId, from, to);
+    const started = Date.now();
+    let p = Math.max(0, from);
+    while (p < end && hits.length < limit) {
+      hits.push(...searchText(this.plainText(docId, p), p, pattern, limit - hits.length));
+      p++;
+      if (Date.now() - started >= budgetMs) break;
+    }
+    return { hits, next: p };
   }
 
   /** Searches pages [from, to). Call repeatedly in batches so the UI can show progress and cancel. */
@@ -586,7 +690,7 @@ export class PdfEngine {
       out = replaceLine(pdf, page, line, text);
       return { pages: [pageIndex] };
     });
-    this.get(docId).text.delete(pageIndex);
+    this.get(docId).text.invalidate(pageIndex);
     return { ...r, ...out };
   }
 
@@ -596,7 +700,7 @@ export class PdfEngine {
       lossy = addText(pdf, this.pdfPage(pdf, pageIndex), origin, text, style).lossy;
       return { pages: [pageIndex] };
     });
-    this.get(docId).text.delete(pageIndex);
+    this.get(docId).text.invalidate(pageIndex);
     return { ...r, lossy };
   }
 
@@ -630,7 +734,7 @@ export class PdfEngine {
       fn(pdf, page, img);
       return { pages: [pageIndex] };
     });
-    this.get(docId).text.delete(pageIndex);
+    this.get(docId).text.invalidate(pageIndex);
     return r;
   }
 
@@ -946,7 +1050,7 @@ export class PdfEngine {
       }
       return { pages: items.map((i) => i.page) };
     });
-    for (const i of items) this.get(docId).text.delete(i.page);
+    for (const i of items) this.get(docId).text.invalidate(i.page);
     return r;
   }
 

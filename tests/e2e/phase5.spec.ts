@@ -165,8 +165,9 @@ test("the assistant is off by default and sends nothing without confirmation", a
   await panel.getByRole("checkbox", { name: "Turn on the assistant" }).check();
   await expect(panel.getByLabel("Service", { exact: true })).toHaveValue("openai");
   await panel.getByLabel("ChatGPT (OpenAI) API key").fill("sk-test");
-  // The model list comes from the service.
-  await panel.getByLabel("Model", { exact: true }).selectOption("model-a");
+  // The model list comes from the service; until it arrives the model is a text field.
+  await expect(panel.getByRole("combobox", { name: "Model", exact: true })).toBeVisible();
+  await panel.getByRole("combobox", { name: "Model", exact: true }).selectOption("model-a");
   await panel.getByRole("button", { name: "Done" }).click();
   await panel.getByRole("button", { name: "Summarise" }).click();
   const confirm = panel.getByRole("alertdialog", { name: "Confirm sending" });

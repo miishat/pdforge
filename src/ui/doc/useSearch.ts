@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { engine } from "../../core/client";
+import { ensureTextIndex, stopTextIndex } from "./textIndex";
 import type { SearchHit, SearchOptions } from "../../core/types";
 
-const BATCH = 25;
 const MAX_HITS = 5000;
 
 export interface SearchState {
@@ -15,6 +15,8 @@ export interface SearchState {
   searched: number;
   error: string | null;
   truncated: boolean;
+  /** How many hits lie before the page the search started from (they arrive last). */
+  hitsBefore: number;
 }
 
 const initial: SearchState = {
@@ -26,6 +28,7 @@ const initial: SearchState = {
   searched: 0,
   error: null,
   truncated: false,
+  hitsBefore: 0,
 };
 
 /** Incremental document search: runs in page batches so results appear quickly and a new query cancels the old one. */
@@ -41,39 +44,69 @@ export function useSearch(docId: number, pageCount: number, startPage: () => num
         return;
       }
       setState((s) => ({ ...s, query, opts, hits: [], current: null, status: "searching", searched: 0, error: null, truncated: false }));
-      const from = startPage();
+      const from = Math.max(0, Math.min(pageCount - 1, startPage()));
       (async () => {
-        const all: SearchHit[] = [];
-        let firstJump = true;
-        for (let p = 0; p < pageCount; p += BATCH) {
-          if (token.current !== my) return;
-          let batch: SearchHit[];
-          try {
-            batch = await engine().call("search", docId, query, opts, p, p + BATCH, MAX_HITS - all.length);
-          } catch (err) {
-            if (token.current === my) setState((s) => ({ ...s, status: "error", error: err instanceof Error ? err.message : String(err) }));
-            return;
+        // On a large document the first search reads every page's text; helper workers do that in parallel.
+        const index = await ensureTextIndex(docId, pageCount, from).catch(() => null);
+        // Search from the reader's page to the end, then wrap around, so nearby results come first.
+        // `head` holds hits before the start page and `tail` the rest; the list shown is head + tail, in page order.
+        const head: SearchHit[] = [];
+        const tail: SearchHit[] = [];
+        const segments: [number, number, SearchHit[]][] = [[from, pageCount, tail], [0, from, head]];
+        let searched = 0;
+        let lastPaint = 0;
+        let picked = false;
+        for (const [segFrom, segTo, into] of segments) {
+          let p = segFrom;
+          while (p < segTo) {
+            if (token.current !== my) return;
+            let r: { hits: SearchHit[]; next: number };
+            try {
+              const helping = !!index?.active;
+              r = await engine().call("find", docId, query, opts, p, segTo, MAX_HITS - head.length - tail.length, 60, !helping);
+              if (helping && r.next === p) {
+                // The helpers haven't read this page yet.
+                await index!.changed();
+                continue;
+              }
+            } catch (err) {
+              if (token.current === my) setState((s) => ({ ...s, status: "error", error: err instanceof Error ? err.message : String(err) }));
+              return;
+            }
+            if (token.current !== my) return;
+            const added = r.hits;
+            searched += r.next - p;
+            p = r.next;
+            into.push(...added);
+            const truncated = head.length + tail.length >= MAX_HITS;
+            const done = truncated || (into === head && p >= segTo) || (into === tail && p >= segTo && from === 0);
+            const now = performance.now();
+            // Repaint at most a few times a second; long result lists are costly to redraw.
+            if (done || now - lastPaint > 250 || (!picked && added.length)) {
+              lastPaint = now;
+              const headLen = head.length;
+              setState((s) => {
+                let current = s.current;
+                if (!picked || current == null) current = tail.length ? headLen : headLen ? 0 : null;
+                // Hits found before the start page are inserted in front, so keep pointing at the same hit.
+                else current += headLen - s.hitsBefore;
+                return {
+                  ...s,
+                  hits: head.concat(tail),
+                  hitsBefore: headLen,
+                  searched: Math.min(pageCount, searched),
+                  current,
+                  status: done ? "done" : "searching",
+                  truncated,
+                };
+              });
+              if (tail.length || head.length) picked = true;
+            }
+            if (truncated) return;
+            if (done) return;
+            // Yield so the UI stays responsive between batches.
+            await new Promise((res) => setTimeout(res, 0));
           }
-          if (token.current !== my) return;
-          all.push(...batch);
-          const truncated = all.length >= MAX_HITS;
-          // Select the first hit at or after the page the reader is on, once it's known.
-          let current: number | null = null;
-          const idx = all.findIndex((h) => h.page >= from);
-          if (idx >= 0) current = idx;
-          else if (p + BATCH >= pageCount && all.length) current = 0;
-          setState((s) => ({
-            ...s,
-            hits: [...all],
-            searched: Math.min(pageCount, p + BATCH),
-            current: firstJump || s.current == null ? current : s.current,
-            status: truncated || p + BATCH >= pageCount ? "done" : "searching",
-            truncated,
-          }));
-          if (current != null) firstJump = false;
-          if (truncated) return;
-          // Yield so the UI stays responsive between batches.
-          await new Promise((r) => setTimeout(r, 0));
         }
       })();
     },
@@ -95,7 +128,13 @@ export function useSearch(docId: number, pageCount: number, startPage: () => num
     setState((s) => ({ ...initial, opts: s.opts }));
   }, []);
 
-  useEffect(() => () => void token.current++, []);
+  useEffect(
+    () => () => {
+      token.current++;
+      stopTextIndex(docId);
+    },
+    [docId],
+  );
 
   return { state, run, step, select, clear };
 }

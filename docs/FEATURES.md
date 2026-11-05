@@ -21,8 +21,13 @@ Legend: ✅ done and tested · 🟡 partial · ⬜ not started
 - ✅ Zoom field (type a value) with presets, Automatic / Fit width / Fit page / Actual size; Ctrl+wheel zooms around the cursor
 - ✅ Marquee zoom (Z); rotate view (Ctrl+Shift+Plus/Minus); single, two-page and two-page-with-cover layouts
 - ✅ Sidebar (F4): page thumbnails, bookmarks, search results, comments, attachments (save a copy), layers (show/hide).
-  Empty panels are hidden
-- ✅ Full-text search (Ctrl+F, F3): match case, whole words, regex, live count, highlights, results list; runs in batches
+  Empty panels are hidden. Resizable by dragging its edge or with the arrow keys (double-click resets); the width is
+  remembered. Bookmarks keep their expanded state when you jump, long names wrap, and the section you're reading is
+  highlighted and revealed (sections opened only for that close again when you move on)
+- ✅ Full-text search (Ctrl+F, F3): match case, whole words, regex, live count, highlights, results list; runs in batches.
+  Starts at the current page and wraps around. Page text is read once and kept, so later searches are near-instant;
+  positions are worked out only for pages on screen. On large unchanged files, helper workers read pages in parallel
+  (17,000 dense pages: about 3 minutes before, about 12 s first search on 4 cores, under 0.1 s after)
 - ✅ Text selection: drag, Shift+click to extend, double-click word, triple-click line, across pages; Ctrl+C, Ctrl+A
 - ✅ Snapshot tool (G): copy any area as an image
 - ✅ Right-click menu: copy, find selected text, select all, tools, rotate, print, properties

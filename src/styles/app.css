@@ -330,7 +330,8 @@ kbd {
 /* ---- Toolbar ---- */
 .toolbar {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  /* The page controls sit in the middle when there's room, but never on top of the mode tabs. */
+  grid-template-columns: minmax(max-content, 1fr) auto minmax(max-content, 1fr);
   align-items: center;
   gap: var(--space-2);
   height: var(--toolbar-h);
@@ -635,11 +636,41 @@ kbd {
 
 /* ---- Sidebar ---- */
 .sidebar {
+  position: relative;
   display: flex;
   width: 280px;
   flex: none;
   background: var(--bg-surface);
   border-right: var(--hairline) solid var(--border);
+}
+/* A wide, invisible grip over the sidebar's right edge; the edge line lights up on hover. */
+.sidebar__resize {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 2;
+}
+.sidebar__resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.sidebar__resize:hover::after,
+.sidebar__resize:active::after,
+.sidebar__resize:focus-visible::after {
+  background: var(--accent);
+}
+.sidebar__resize:focus-visible {
+  outline: none;
 }
 .sidebar__rail {
   display: flex;
@@ -725,7 +756,7 @@ kbd {
 }
 .tree__row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
 }
 .tree__toggle {
   display: grid;
@@ -746,9 +777,9 @@ kbd {
   background: none;
   font-size: var(--text-sm);
   text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Long chapter names wrap instead of being cut off. */
+  overflow-wrap: anywhere;
+  line-height: 1.35;
 }
 .tree__label:hover:not(:disabled),
 .results__item:hover,
@@ -2372,7 +2403,24 @@ textarea.form-field {
 
 /* ---- Sidebar editing ---- */
 .bookmarks__add {
+  max-width: 100%;
   margin: var(--space-1) 0 var(--space-2);
+  white-space: nowrap;
+}
+.bookmarks__add-text {
+  flex: none;
+}
+.bookmarks__add-page {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.tree__row--current .tree__label {
+  color: var(--accent);
+  font-weight: var(--weight-semibold);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .tree__row--selected .tree__label {
   background: var(--accent-soft);
@@ -3260,10 +3308,11 @@ textarea.form-field {
 }
 @container docview (max-width: 900px) {
   .toolbar {
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: max-content minmax(0, 1fr) max-content;
   }
   .toolbar__center {
     justify-content: center;
+    overflow: hidden;
   }
   .mode-switch__tab {
     padding: 0 var(--space-2);
@@ -3282,5 +3331,11 @@ textarea.form-field {
   .mode-switch__tab {
     padding: 0 6px;
     font-size: var(--text-xs);
+  }
+}
+/* Zoom stays on Ctrl+wheel, Ctrl+plus/minus and the View menu. */
+@container docview (max-width: 800px) {
+  .toolbar__center .zoom-control {
+    display: none;
   }
 }

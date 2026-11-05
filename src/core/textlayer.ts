@@ -132,8 +132,12 @@ export function buildPattern(query: string, opts: SearchOptions): RegExp | null 
 
 /** Finds all matches on one page. Zero-length regex matches are skipped. */
 export function searchLayer(layer: TextLayer, page: number, pattern: RegExp, limit = Infinity): SearchHit[] {
+  return searchText(layer.text, page, pattern, limit, layer);
+}
+
+/** Finds all matches in a page's text. Without the text layer, hits have no rectangles yet (see `hitRects`). */
+export function searchText(text: string, page: number, pattern: RegExp, limit = Infinity, layer?: TextLayer): SearchHit[] {
   const hits: SearchHit[] = [];
-  const text = layer.text;
   pattern.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = pattern.exec(text)) && hits.length < limit) {
@@ -147,13 +151,18 @@ export function searchLayer(layer: TextLayer, page: number, pattern: RegExp, lim
       page,
       start,
       end,
-      rects: rectsForRange(layer, start, end),
+      rects: layer ? rectsForRange(layer, start, end) : [],
       before: snippet(text.slice(Math.max(0, start - 40), start), "start"),
       match: m[0].replace(/\s+/g, " "),
       after: snippet(text.slice(end, end + 60), "end"),
     });
   }
   return hits;
+}
+
+/** Rectangles for a hit found by `searchText`, once the page's text layer is at hand. */
+export function hitRects(hit: SearchHit, layer: TextLayer): Rect[] {
+  return hit.rects.length ? hit.rects : rectsForRange(layer, hit.start, hit.end);
 }
 
 function snippet(s: string, side: "start" | "end"): string {

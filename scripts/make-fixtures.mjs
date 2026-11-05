@@ -48,6 +48,21 @@ writeFileSync(
 const many = makeDoc(Array.from({ length: 300 }, (_, i) => ({ size: letter, lines: [`Page ${i + 1}`, "Long document for performance tests."] })));
 writeFileSync(new URL("long-300.pdf", out), many.saveToBuffer("compress").asUint8Array());
 
+// The same 300 pages with nested, collapsed chapters (long part titles), for the bookmarks panel.
+{
+  const chapters = mupdf.Document.openDocument(many.saveToBuffer("compress"), "application/pdf");
+  const it = chapters.outlineIterator();
+  for (let part = 0; part < 3; part++) {
+    it.insert({ title: `Part ${part + 1}: a fairly long part title that will not fit in a narrow sidebar`, uri: `#page=${part * 100 + 1}`, open: false });
+    it.prev();
+    it.down();
+    for (let ch = 0; ch < 5; ch++) it.insert({ title: `Chapter ${part * 5 + ch + 1}`, uri: `#page=${part * 100 + ch * 20 + 1}`, open: false });
+    it.up();
+    it.next();
+  }
+  writeFileSync(new URL("chapters.pdf", out), chapters.asPDF().saveToBuffer("compress").asUint8Array());
+}
+
 // Feature-rich document: outline, internal + external links, an attachment, comments, searchable text.
 const rich = makeDoc([
   { size: letter, lines: ["Contents", "Go to the chapter on rivers", "Visit example.com", "Search term: aurora appears here."] },

@@ -12,6 +12,7 @@ import {
   SlideMultiple20Regular,
 } from "@fluentui/react-icons";
 import { memo, useEffect, useRef, useState } from "react";
+import { load, save } from "../settings";
 import { CancelledError, engine } from "../../core/client";
 import type { AttachmentInfo, DocInfo, LayerInfo, OutlineNode } from "../../core/types";
 import type { Dest } from "./Canvas";
@@ -69,8 +70,36 @@ export function Sidebar(props: Props) {
   );
   const shown = available.some((p) => p.id === panel) ? panel : "thumbnails";
   const title = PANELS.find((p) => p.id === shown)!.label;
+  const [width, setWidth] = useState(() => clampWidth(load("sidebar.width", DEFAULT_WIDTH)));
+  const resize = (w: number) => {
+    const next = clampWidth(w);
+    setWidth(next);
+    save("sidebar.width", next);
+  };
+  const onHandleDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    const startX = e.clientX;
+    const startW = width;
+    let w = startW;
+    const move = (ev: PointerEvent) => {
+      w = clampWidth(startW + ev.clientX - startX);
+      setWidth(w);
+    };
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+      save("sidebar.width", w);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  };
   return (
-    <aside className="sidebar" aria-label="Sidebar">
+    <aside className="sidebar" aria-label="Sidebar" style={{ width }}>
       <nav className="sidebar__rail" role="tablist" aria-label="Sidebar panels" aria-orientation="vertical">
         {available.map((p) => (
           <button
@@ -107,11 +136,42 @@ export function Sidebar(props: Props) {
           {shown === "layers" && <Layers items={props.layers} onToggle={props.onToggleLayer} />}
         </div>
       </section>
+      <div
+        className="sidebar__resize"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        aria-valuenow={width}
+        aria-valuemin={MIN_WIDTH}
+        aria-valuemax={MAX_WIDTH}
+        title="Drag to resize. Double-click to reset."
+        tabIndex={0}
+        onPointerDown={onHandleDown}
+        onDoubleClick={() => resize(DEFAULT_WIDTH)}
+        onKeyDown={(e) => {
+          const step = e.shiftKey ? 64 : 16;
+          if (e.key === "ArrowLeft") resize(width - step);
+          else if (e.key === "ArrowRight") resize(width + step);
+          else if (e.key === "Home") resize(MIN_WIDTH);
+          else if (e.key === "End") resize(MAX_WIDTH);
+          else return;
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+      />
     </aside>
   );
 }
 
 const THUMB_W = 112;
+const DEFAULT_WIDTH = 280;
+const MIN_WIDTH = 200;
+const MAX_WIDTH = 720;
+function clampWidth(w: number): number {
+  // Leave room for the document, even on a small window.
+  const max = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, window.innerWidth * 0.6));
+  return Math.round(Math.max(MIN_WIDTH, Math.min(max, Number.isFinite(w) ? w : DEFAULT_WIDTH)));
+}
 
 function Thumbnails({ info, currentPage, onGo, renderVersion, data }: Props) {
   useDocData(data);

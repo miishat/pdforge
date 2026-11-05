@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { caretAt, charRect, lineAt, wordAt } from "../../core/textlayer";
+import { caretAt, charRect, hitRects, lineAt, wordAt } from "../../core/textlayer";
 import type { DocInfo, LinkInfo, Rect, SearchHit, ViewRotation } from "../../core/types";
 import { rotatedSize, toPage, toView } from "../geometry";
 import { GAP, layoutPages, pagesInRange, rowAt, type Layout, type LayoutMode } from "../layout";
@@ -433,9 +433,18 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(props, ref
     const out = new Map<number, PageOverlay>();
     for (const p of pages) {
       const pageHits: PageOverlay["hits"] = [];
-      hits.forEach((h, i) => {
-        if (h.page === p) for (const rect of h.rects) pageHits.push({ rect, current: i === currentHit });
-      });
+      const layer = data.textLayerNow(p);
+      if (layer) {
+        // Hits are in page order, so find this page's run by binary search instead of scanning them all.
+        let lo = 0;
+        let hi = hits.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if (hits[mid].page < p) lo = mid + 1;
+          else hi = mid;
+        }
+        for (let i = lo; i < hits.length && hits[i].page === p; i++) for (const rect of hitRects(hits[i], layer)) pageHits.push({ rect, current: i === currentHit });
+      }
       out.set(p, { hits: pageHits, selection: selectionRects(selection, p, data.textLayerNow(p)) });
     }
     return out;

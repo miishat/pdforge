@@ -3,8 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { engine } from "../../core/client";
 import type { FormSummary, WidgetInfo } from "../../core/forms";
 import type { SignatureInfo } from "../../core/signing";
-import { rectsForRange } from "../../core/textlayer";
-import type { AnnotationInfo, AnnotationPatch, AttachmentInfo, DocInfo, EditState, LayerInfo, LinkInfo, NewAnnotation, OutlineNode, Rect, ViewRotation } from "../../core/types";
+import { hitRects, rectsForRange } from "../../core/textlayer";
+import type { AnnotationInfo, AnnotationPatch, AttachmentInfo, DocInfo, EditState, LayerInfo, LinkInfo, NewAnnotation, OutlineNode, Rect, TextLayer, ViewRotation } from "../../core/types";
 import {
   copyPng, copyText, isDesktop, openExternal, pickFile, recoveryClear, recoverySave, saveAs, saveBytes, userName, writePath,
 } from "../../platform";
@@ -305,9 +305,20 @@ export function DocumentView(props: DocumentViewProps) {
   // Bring the current search hit into view.
   const hit = search.state.current != null ? search.state.hits[search.state.current] : null;
   useEffect(() => {
-    if (!hit || !hit.rects.length) return;
-    const r = hit.rects.reduce<Rect>((a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])], hit.rects[0]);
-    canvas.current?.scrollTo({ page: hit.page, rect: r });
+    if (!hit) return;
+    let live = true;
+    const go = (layer: TextLayer | undefined) => {
+      const rects = layer ? hitRects(hit, layer) : hit.rects;
+      if (!live) return;
+      if (!rects.length) return canvas.current?.scrollTo({ page: hit.page });
+      const r = rects.reduce<Rect>((a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])], rects[0]);
+      canvas.current?.scrollTo({ page: hit.page, rect: r });
+    };
+    // The position of a hit is worked out from the page's text layer, which may still be loading.
+    const now = data.textLayerNow(hit.page);
+    if (now || hit.rects.length) go(now);
+    else data.textLayer(hit.page).then(go, () => go(undefined));
+    return () => void (live = false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hit]);
 
