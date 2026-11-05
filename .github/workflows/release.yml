@@ -77,13 +77,15 @@ jobs:
         env:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
+          # Empty matches and an early stop by head aren't errors here.
+          set +o pipefail
           # The newest earlier release tag, if any.
-          previous=$(git tag --list 'v*' --sort=-version:refname | grep -vx "$TAG" | head -1)
+          previous=$(git tag --list 'v*' --sort=-version:refname | grep -vx "$TAG" | head -1 || true)
           if [ -n "$previous" ]; then range="$previous..HEAD"; else range="HEAD"; fi
           {
             echo "Changes in this version:"
             echo
-            git log --no-merges --format='- %s' "$range" | grep -v '^- Release [0-9]' | head -60
+            git log --no-merges --format='- %s' "$range" | grep -v '^- Release [0-9]' | head -60 || true
             echo
             echo "Installed copies of PDForge (0.2.0 and later) offer this update on their own. To install by hand, download the setup .exe below."
           } > release-notes.md
