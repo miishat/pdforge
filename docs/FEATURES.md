@@ -14,8 +14,16 @@ Legend: ✅ done and tested · 🟡 partial · ⬜ not started
 ## Phase 1: Viewer (Acrobat Reader parity)
 - ✅ Tabs: open several files, Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+W, middle-click to close; reopening a file focuses its tab
 - ✅ Single instance: double-clicking a PDF while PDForge is open adds a tab instead of a second window
-- ✅ Recent files on the start screen with thumbnails, folder, time, the page you were on (reopens there), and removal
-- ⬜ Snap Layouts on the custom maximize button (needs a native window hook; planned)
+- ✅ Recent files on the start screen with thumbnails, folder, time, the page you were on (reopens there), and removal;
+  opened files also appear in PDForge's taskbar jump list (right-click the taskbar icon)
+- 🟡 Snap Layouts on the custom maximize button: resting on it for half a second opens Windows 11's layout flyout
+  (PDForge presses Win+Z for you, only when its window is in front, on Windows 11, with snap layouts turned on in
+  Windows settings). Not yet tried on a real Windows PC
+- ✅ Default PDF app: if PDForge isn't the app Windows opens PDFs with, a one-time notice offers "Make default", which
+  lists PDForge under Settings > Default apps and opens its page there (Windows only lets the user make that choice).
+  Also in the command palette. The uninstaller removes the listing
+- ✅ Files over 1.5 GB are refused straight away with a message saying why (the PDF engine has 2 GB of working memory,
+  and the whole file must fit in it)
 - ✅ Prioritized, cancellable render queue (visible pages first, stale renders dropped)
 - ✅ Sharp detail tile at very high zoom (base bitmap capped at 12 MP)
 - ✅ Zoom field (type a value) with presets, Automatic / Fit width / Fit page / Actual size; Ctrl+wheel zooms around the cursor
@@ -29,7 +37,11 @@ Legend: ✅ done and tested · 🟡 partial · ⬜ not started
 - ✅ Full-text search (Ctrl+F, F3): match case, whole words, regex, live count, highlights, results list; runs in batches.
   Starts at the current page and wraps around. Page text is read once and kept, so later searches are near-instant;
   positions are worked out only for pages on screen. On large unchanged files, helper workers read pages in parallel
-  (17,000 dense pages: about 3 minutes before, about 12 s first search on 4 cores, under 0.1 s after)
+  (17,000 dense pages: about 3 minutes before, about 13 s first search on 4 cores, under 0.1 s after).
+  For files over 500 pages, the text is then saved (compressed, about 1–2 KB a page; 12.5 MB for the 17,000-page test
+  file) so the first search after reopening takes about 1.3 s instead of 13 s. Saved only for unchanged files without
+  an open password, keyed to the file's exact contents (SHA-256), at most 200 MB in all (least recently used dropped
+  first), in the app's data folder. "Clear saved search data" in the command palette deletes it
 - ✅ Text selection: drag, Shift+click to extend, double-click word, triple-click line, across pages; Ctrl+C, Ctrl+A
 - ✅ Snapshot tool (G): copy any area as an image
 - ✅ Right-click menu: copy, find selected text, select all, tools, rotate, print, properties
@@ -135,7 +147,7 @@ close-window prompt (all are desktop-only paths; the browser test build download
   Office import is MuPDF's (simple formatting only); passwords with commas or "=" (MuPDF option syntax)
 
 ## Phase 5: Beyond Acrobat
-- ✅ Command palette (Ctrl+K): every action (60 commands), searched by words in any order, with shortcuts shown and
+- ✅ Command palette (Ctrl+K): every action (64 commands), searched by words in any order, with shortcuts shown and
   recently used commands first
 - ✅ Fully rebindable shortcuts (Keyboard shortcuts…): click a command and press the new keys; conflicts move the
   shortcut instead of doubling it; per-command reset or reset all; reserved Windows keys refused. Saved

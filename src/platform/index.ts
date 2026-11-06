@@ -23,12 +23,12 @@ export async function pickFiles(filter: { name: string; extensions: string[] }):
     if (!paths) return [];
     return Promise.all((Array.isArray(paths) ? paths : [paths]).map(readPath));
   }
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const input = document.createElement("input");
     input.type = "file";
     input.multiple = true;
     input.accept = filter.extensions.map((e) => `.${e}`).join(",");
-    input.onchange = async () => resolve(await Promise.all([...(input.files ?? [])].map(fromBrowserFile)));
+    input.onchange = () => void Promise.all([...(input.files ?? [])].map(fromBrowserFile)).then(resolve, reject);
     input.oncancel = () => resolve([]);
     input.click();
   });
@@ -41,18 +41,29 @@ export async function pickPdfs(): Promise<PickedFile[]> {
     if (!paths) return [];
     return Promise.all((Array.isArray(paths) ? paths : [paths]).map(readPath));
   }
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const input = document.createElement("input");
     input.type = "file";
     input.multiple = true;
     input.accept = "application/pdf,.pdf";
-    input.onchange = async () => resolve(await Promise.all([...(input.files ?? [])].map(fromBrowserFile)));
+    input.onchange = () => void Promise.all([...(input.files ?? [])].map(fromBrowserFile)).then(resolve, reject);
     input.oncancel = () => resolve([]);
     input.click();
   });
 }
 
+/**
+ * The largest file PDForge opens. The PDF engine has 2 GB of working memory in all, and the file must fit in it with
+ * room to spare. The desktop app checks this before reading (MAX_OPEN_BYTES in src-tauri/src/lib.rs).
+ */
+export const MAX_OPEN_BYTES = 1536 * 1024 * 1024;
+
+export function tooLargeMessage(name: string, size: number): string {
+  return `${name} is ${(size / 1024 ** 3).toFixed(1)} GB. PDForge can open files up to 1.5 GB: its PDF engine has 2 GB of working memory, and the whole file has to fit in it.`;
+}
+
 export async function fromBrowserFile(file: File): Promise<PickedFile> {
+  if (file.size > MAX_OPEN_BYTES) throw new Error(tooLargeMessage(file.name, file.size));
   return { name: file.name, path: null, bytes: new Uint8Array(await file.arrayBuffer()) };
 }
 
@@ -132,11 +143,11 @@ export async function pickFile(filter: { name: string; extensions: string[] }): 
     const path = await open({ multiple: false, filters: any ? [] : [filter] });
     return typeof path === "string" ? readPath(path) : null;
   }
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const input = document.createElement("input");
     input.type = "file";
     if (!any) input.accept = filter.extensions.map((e) => `.${e}`).join(",");
-    input.onchange = async () => resolve(input.files?.[0] ? await fromBrowserFile(input.files[0]) : null);
+    input.onchange = () => void (input.files?.[0] ? fromBrowserFile(input.files[0]) : Promise.resolve(null)).then(resolve, reject);
     input.oncancel = () => resolve(null);
     input.click();
   });
@@ -222,6 +233,31 @@ export async function windowAction(action: "minimize" | "toggleMaximize" | "clos
   if (!isDesktop) return;
   const { getCurrentWindow } = await import("@tauri-apps/api/window");
   await getCurrentWindow()[action]();
+}
+
+/** Opens Windows 11's Snap Layouts flyout for this window (it can't appear over a custom maximize button by itself). */
+export async function showSnapLayouts(): Promise<void> {
+  if (isDesktop) await invoke("show_snap_layouts").catch(() => {});
+}
+
+/** Puts a file in PDForge's taskbar jump list (Windows' recent items). */
+export async function addRecentDocument(path: string): Promise<void> {
+  if (isDesktop) await invoke("add_recent_document", { path }).catch(() => {});
+}
+
+/** Whether PDForge is the app Windows opens PDFs with. */
+export async function defaultPdfApp(): Promise<"yes" | "no" | "unknown"> {
+  if (!isDesktop) return "unknown";
+  return invoke<"yes" | "no" | "unknown">("default_pdf_app").catch(() => "unknown" as const);
+}
+
+/**
+ * Lists PDForge in Settings > Default apps and opens its page there. Windows doesn't let apps make themselves the
+ * default, so the user confirms it in Settings.
+ */
+export async function openDefaultAppSettings(): Promise<void> {
+  if (!isDesktop) throw new Error("This needs the desktop app.");
+  await invoke("open_default_app_settings");
 }
 
 export async function setWindowTitle(title: string): Promise<void> {
@@ -354,3 +390,76 @@ export async function checkForUpdate(): Promise<AvailableUpdate | null> {
     },
   };
 }
+
+// ---- Saved search text (large PDFs) ----
+
+export interface SavedTextEntry {
+  key: string;
+  size: number;
+  /** Last used, ms since 1970. */
+  used: number;
+}
+
+/** Where the page text of large PDFs is kept between sessions: the app's data folder, or IndexedDB in the browser. */
+export interface SavedTextStore {
+  read(key: string): Promise<Uint8Array | null>;
+  write(key: string, data: Uint8Array): Promise<void>;
+  list(): Promise<SavedTextEntry[]>;
+  remove(key: string): Promise<void>;
+  clear(): Promise<void>;
+}
+
+const desktopTextStore: SavedTextStore = {
+  async read(key) {
+    const buf = await invoke<ArrayBuffer>("search_index_read", { key });
+    return buf.byteLength ? new Uint8Array(buf) : null;
+  },
+  async write(key, data) {
+    await invoke("search_index_write", data, { headers: { key } });
+  },
+  list: () => invoke<SavedTextEntry[]>("search_index_list"),
+  remove: (key) => invoke("search_index_remove", { key }),
+  clear: () => invoke("search_index_clear"),
+};
+
+function idb<T>(mode: IDBTransactionMode, run: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open("pdforge-search-text", 1);
+    open.onupgradeneeded = () => open.result.createObjectStore("texts", { keyPath: "key" });
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const req = run(db.transaction("texts", mode).objectStore("texts"));
+      req.onsuccess = () => (resolve(req.result), db.close());
+      req.onerror = () => (reject(req.error), db.close());
+    };
+  });
+}
+
+interface IdbText extends SavedTextEntry {
+  data: Uint8Array;
+}
+
+const browserTextStore: SavedTextStore = {
+  async read(key) {
+    const row = await idb<IdbText | undefined>("readonly", (s) => s.get(key));
+    if (!row) return null;
+    await idb("readwrite", (s) => s.put({ ...row, used: Date.now() }));
+    return row.data;
+  },
+  async write(key, data) {
+    await idb("readwrite", (s) => s.put({ key, data, size: data.length, used: Date.now() } satisfies IdbText));
+  },
+  async list() {
+    const rows = await idb<IdbText[]>("readonly", (s) => s.getAll());
+    return rows.map(({ key, size, used }) => ({ key, size, used }));
+  },
+  async remove(key) {
+    await idb("readwrite", (s) => s.delete(key));
+  },
+  async clear() {
+    await idb("readwrite", (s) => s.clear());
+  },
+};
+
+export const savedTextStore: SavedTextStore = isDesktop ? desktopTextStore : browserTextStore;

@@ -1,3 +1,5 @@
+mod shell;
+
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::ipc::{InvokeBody, Request, Response};
@@ -11,10 +13,27 @@ fn launch_files(state: State<'_, LaunchFiles>) -> Vec<String> {
     state.0.lock().map(|mut f| std::mem::take(&mut *f)).unwrap_or_default()
 }
 
+/// The largest file PDForge opens. The PDF engine has 2 GB of working memory in all, and the file must fit in it
+/// with room to spare. Keep in step with MAX_OPEN_BYTES in src/platform/index.ts.
+const MAX_OPEN_BYTES: u64 = 1536 * 1024 * 1024;
+
+fn too_large_message(name: &str, size: u64) -> String {
+    format!(
+        "{name} is {:.1} GB. PDForge can open files up to 1.5 GB: its PDF engine has 2 GB of working memory, and the whole file has to fit in it.",
+        size as f64 / (1024.0 * 1024.0 * 1024.0)
+    )
+}
+
 /// Reads a file and returns its bytes as a binary IPC response (no JSON/base64 overhead).
+/// Files too large to open are refused before reading, with a message saying why.
 #[tauri::command]
 async fn read_file(path: String) -> Result<Response, String> {
     let path = PathBuf::from(path);
+    let size = std::fs::metadata(&path).map_err(|e| io_message(&path, "read", e))?.len();
+    if size > MAX_OPEN_BYTES {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        return Err(too_large_message(&name, size));
+    }
     std::fs::read(&path).map(Response::new).map_err(|e| io_message(&path, "read", e))
 }
 
@@ -168,6 +187,111 @@ fn recovery_clear(app: tauri::AppHandle, key: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Saved page text of large PDFs, so their first search after reopening needn't read every page again.
+/// One file per PDF, named by the SHA-256 of its contents. The UI keeps the folder under its size budget.
+fn search_index_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| format!("No app data folder: {e}"))?
+        .join("search-index");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't create the search data folder: {e}"))?;
+    Ok(dir)
+}
+
+fn search_index_key(raw: &str) -> Result<String, String> {
+    if raw.len() == 64 && raw.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Ok(raw.to_ascii_lowercase())
+    } else {
+        Err("Invalid search data key.".into())
+    }
+}
+
+/// The saved text for a file, or an empty response if there is none. Reading marks it as recently used.
+#[tauri::command]
+async fn search_index_read(app: tauri::AppHandle, key: String) -> Result<Response, String> {
+    let path = search_index_dir(&app)?.join(format!("{}.bin", search_index_key(&key)?));
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            if let Ok(f) = std::fs::File::options().write(true).open(&path) {
+                let _ = f.set_modified(std::time::SystemTime::now());
+            }
+            Ok(Response::new(bytes))
+        }
+        Err(_) => Ok(Response::new(Vec::<u8>::new())),
+    }
+}
+
+#[tauri::command]
+async fn search_index_write(app: tauri::AppHandle, request: Request<'_>) -> Result<(), String> {
+    let InvokeBody::Raw(bytes) = request.body() else {
+        return Err("Expected search data.".into());
+    };
+    let key = request
+        .headers()
+        .get("key")
+        .and_then(|v| v.to_str().ok())
+        .ok_or("Missing search data key.")?;
+    let dir = search_index_dir(&app)?;
+    let key = search_index_key(key)?;
+    let tmp = dir.join(format!("{key}.tmp"));
+    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, dir.join(format!("{key}.bin"))).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })
+}
+
+#[derive(serde::Serialize)]
+struct SearchIndexEntry {
+    key: String,
+    size: u64,
+    /// Last used, in milliseconds since 1970.
+    used: u64,
+}
+
+#[tauri::command]
+fn search_index_list(app: tauri::AppHandle) -> Result<Vec<SearchIndexEntry>, String> {
+    let dir = search_index_dir(&app)?;
+    let mut out = vec![];
+    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("bin") {
+            continue;
+        }
+        let Some(key) = path.file_stem().and_then(|s| s.to_str()).and_then(|k| search_index_key(k).ok()) else { continue };
+        let Ok(meta) = entry.metadata() else { continue };
+        let used = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        out.push(SearchIndexEntry { key, size: meta.len(), used });
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+fn search_index_remove(app: tauri::AppHandle, key: String) -> Result<(), String> {
+    let path = search_index_dir(&app)?.join(format!("{}.bin", search_index_key(&key)?));
+    let _ = std::fs::remove_file(path);
+    Ok(())
+}
+
+/// Deletes all saved search data (files left over from interrupted writes too).
+#[tauri::command]
+fn search_index_clear(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = search_index_dir(&app)?;
+    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        let path = entry.path();
+        if matches!(path.extension().and_then(|e| e.to_str()), Some("bin" | "tmp")) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+    Ok(())
+}
+
 fn io_message(path: &PathBuf, verb: &str, e: std::io::Error) -> String {
     match e.kind() {
         std::io::ErrorKind::NotFound => format!("{} doesn't exist any more.", path.display()),
@@ -241,7 +365,16 @@ pub fn run() {
             recovery_save,
             recovery_list,
             recovery_read,
-            recovery_clear
+            recovery_clear,
+            search_index_read,
+            search_index_write,
+            search_index_list,
+            search_index_remove,
+            search_index_clear,
+            shell::show_snap_layouts,
+            shell::add_recent_document,
+            shell::default_pdf_app,
+            shell::open_default_app_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running PDForge");
@@ -249,7 +382,23 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{percent_decode, recovery_key};
+    use super::{percent_decode, recovery_key, search_index_key, too_large_message};
+
+    #[test]
+    fn explains_files_that_are_too_large() {
+        let m = too_large_message("scans.pdf", 2_576_980_378);
+        assert!(m.starts_with("scans.pdf is 2.4 GB."), "{m}");
+        assert!(m.contains("up to 1.5 GB"));
+    }
+
+    #[test]
+    fn search_index_keys_are_hashes_only() {
+        let hash = "a".repeat(64);
+        assert_eq!(search_index_key(&hash).unwrap(), hash);
+        assert_eq!(search_index_key(&"AB".repeat(32)).unwrap(), "ab".repeat(32));
+        assert!(search_index_key("../evil").is_err());
+        assert!(search_index_key(&format!("{}/", "a".repeat(63))).is_err());
+    }
 
     #[test]
     fn recovery_keys_cannot_escape_the_folder() {

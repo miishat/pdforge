@@ -3,7 +3,7 @@ import { engine } from "./core/client";
 import type { DocInfo } from "./core/types";
 import {
   fromBrowserFile, isDesktop, launchFiles, onOpenFiles, onWindowCloseRequested, pickFiles, pickPdfs, readPath, recoveryClear, recoveryList,
-  recoveryRead, setWindowTitle, type AvailableUpdate, type PickedFile, type RecoveryMeta,
+  recoveryRead, savedTextStore, addRecentDocument, setWindowTitle, type AvailableUpdate, type PickedFile, type RecoveryMeta,
 } from "./platform";
 import { UnsavedDialog } from "./ui/doc/Dialogs";
 import { DocumentView, type DocCommands, type ViewHandle } from "./ui/doc/DocumentView";
@@ -22,6 +22,12 @@ import { autoUpdatesOn, setAutoUpdates, useUpdates } from "./ui/updates";
 import { useTabs, type Tab } from "./ui/useTabs";
 import { IMPORTABLE } from "./core/convert";
 import { defaultPaper } from "./ui/paper";
+import { clearSavedText } from "./ui/doc/savedText";
+import { useDefaultAppOffer } from "./ui/defaultApp";
+
+function formatMB(bytes: number): string {
+  return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
 
 /** Distinguishes this run's recovery files from those left by a previous (crashed) run. */
 const SESSION = Date.now().toString(36);
@@ -76,6 +82,13 @@ export function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [infoNote, setInfoNote] = useState<string | null>(null);
   const updates = useUpdates();
+  const defaultApp = useDefaultAppOffer(updates.state.kind !== "idle");
+  const makeDefault = useCallback(async () => {
+    setNotice(null);
+    const error = await defaultApp.makeDefault();
+    if (error) setNotice(error);
+    else setInfoNote("In Settings, choose PDForge for .pdf files. You can do this later from the command palette (Ctrl+K): “Make PDForge the default PDF app…”.");
+  }, [defaultApp]);
   const installUpdate = useCallback(
     async (update: AvailableUpdate) => {
       // The installer closes PDForge, so settle unsaved changes first.
@@ -112,7 +125,13 @@ export function App() {
     [open, convertAndOpen],
   );
   const createPdf = useCallback(async () => {
-    const files = await pickFiles({ name: "Documents and images", extensions: Object.keys(IMPORTABLE) });
+    let files: PickedFile[];
+    try {
+      files = await pickFiles({ name: "Documents and images", extensions: Object.keys(IMPORTABLE) });
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : String(err));
+      return;
+    }
     if (!files.length) return;
     const name = files.length === 1 ? files[0].name.replace(/\.[^.]+$/, "") + ".pdf" : "Combined.pdf";
     await convertAndOpen(files, name, true);
@@ -123,14 +142,19 @@ export function App() {
         try {
           openFiles([await readPath(p)]);
         } catch (err) {
-          setMissing((m) => new Set(m).add(p));
+          const message = err instanceof Error ? err.message : String(err);
+          if (/doesn't exist/.test(message)) setMissing((m) => new Set(m).add(p));
+          else setNotice(message);
           console.warn(err);
         }
       }
     },
     [openFiles],
   );
-  const openDialog = useCallback(() => pickPdfs().then(openFiles), [openFiles]);
+  const openDialog = useCallback(
+    () => pickPdfs().then(openFiles, (err) => setNotice(err instanceof Error ? err.message : String(err))),
+    [openFiles],
+  );
 
   // Files from Windows: at launch, and later from a second launch (single-instance).
   useEffect(() => {
@@ -153,6 +177,7 @@ export function App() {
       const path = t.path;
       const info = t.state.info;
       setRecent((list) => addRecent(list, { path, name: t.name, openedAt: Date.now(), pageCount: info.pageCount }));
+      void addRecentDocument(path);
       setMissing((m) => {
         const n = new Set(m);
         n.delete(path);
@@ -237,6 +262,17 @@ export function App() {
     "window.split": activeTab?.state.kind === "ready" ? toggleSplit : undefined,
     "window.syncScroll": splitOn ? () => setSyncScroll((v) => !v) : undefined,
     "window.shortcuts": () => setShortcuts(true),
+    "window.defaultApp": isDesktop ? () => void makeDefault() : undefined,
+    "window.clearSearchData": async () => {
+      setNotice(null);
+      try {
+        const size = (await savedTextStore.list()).reduce((n, e) => n + e.size, 0);
+        await clearSavedText();
+        setInfoNote(size ? `Saved search data cleared (${formatMB(size)}). Large PDFs read their text again on their next search.` : "There was no saved search data.");
+      } catch (err) {
+        setNotice(`Couldn't clear the saved search data: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
     "window.checkUpdates": isDesktop ? () => void updates.check(true) : undefined,
     "window.autoUpdates": isDesktop
       ? () => {
@@ -325,7 +361,11 @@ export function App() {
           if (!e.dataTransfer.files.length) return;
           e.preventDefault();
           setDragging(false);
-          openFiles(await Promise.all([...e.dataTransfer.files].map(fromBrowserFile)));
+          try {
+            openFiles(await Promise.all([...e.dataTransfer.files].map(fromBrowserFile)));
+          } catch (err) {
+            setNotice(err instanceof Error ? err.message : String(err));
+          }
         },
       };
 
@@ -338,6 +378,15 @@ export function App() {
     <div className="app" {...browserDrop}>
       <TitleBar tabs={tabs} activeId={activeId} onActivate={setActiveId} onClose={close} onNew={openDialog} />
       <UpdateBar state={updates.state} onInstall={(u) => void installUpdate(u)} onDismiss={updates.dismiss} onRetry={() => void updates.check(true)} />
+      {defaultApp.offer && (
+        <div className="infobar app-notice" role="status">
+          <span>PDForge isn't your default app for PDF files.</span>
+          <button className="button button--small button--primary" onClick={() => void makeDefault()}>
+            Make default
+          </button>
+          <button className="link-button" onClick={defaultApp.dismiss}>Not now</button>
+        </div>
+      )}
       {infoNote && (
         <div className="infobar infobar--good app-notice" role="status">
           {infoNote}

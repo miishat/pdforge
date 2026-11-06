@@ -15,6 +15,11 @@ const MEMORY_BUDGET = 800_000_000;
  */
 export class TextIndexJob {
   active = true;
+  /** True once every page has been read (rather than the job being stopped early). */
+  complete = false;
+  private ended!: () => void;
+  /** Resolves when the job ends, for any reason. */
+  readonly finished = new Promise<void>((r) => (this.ended = r));
   private readonly workers: Worker[] = [];
   private readonly queue: [number, number][] = [];
   private busy = 0;
@@ -52,6 +57,7 @@ export class TextIndexJob {
     for (const w of this.workers) w.terminate();
     if (jobs.get(this.docId) === this) jobs.delete(this.docId);
     this.notify();
+    this.ended();
   }
 
   private notify() {
@@ -63,7 +69,10 @@ export class TextIndexJob {
   private next(w: Worker) {
     const chunk = this.queue.shift();
     if (!chunk) {
-      if (this.busy === 0) this.stop();
+      if (this.busy === 0) {
+        this.complete = true;
+        this.stop();
+      }
       return;
     }
     this.busy++;

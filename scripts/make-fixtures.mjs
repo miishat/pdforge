@@ -48,6 +48,14 @@ writeFileSync(
 const many = makeDoc(Array.from({ length: 300 }, (_, i) => ({ size: letter, lines: [`Page ${i + 1}`, "Long document for performance tests."] })));
 writeFileSync(new URL("long-300.pdf", out), many.saveToBuffer("compress").asUint8Array());
 
+// Over 500 pages, so its text is saved for the next session's search. One rare word, on page 450.
+{
+  const big = makeDoc(
+    Array.from({ length: 600 }, (_, i) => ({ size: letter, lines: [`Page ${i + 1}`, i === 449 ? "The quetzal nests here." : "Long document for saved search text."] })),
+  );
+  writeFileSync(new URL("long-600.pdf", out), big.saveToBuffer("compress").asUint8Array());
+}
+
 // The same 300 pages with nested, collapsed chapters (long part titles), for the bookmarks panel.
 {
   const chapters = mupdf.Document.openDocument(many.saveToBuffer("compress"), "application/pdf");

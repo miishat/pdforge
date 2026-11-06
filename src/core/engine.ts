@@ -20,6 +20,7 @@ import { pageWidgets, resetForm, setFieldValue, summarize, type FormSummary, typ
 import { openIdentity, signDocument, verifySignatures, type Identity, type SignatureInfo, type SignOptions } from "./signing";
 import { buildPattern, searchLayer, searchText } from "./textlayer";
 import { plainPageText } from "./plaintext";
+import { sha256Hex, unpackPlainText } from "./plainStore";
 import {
   describeEncryption, fromEnginePermissions, securityOptions, validateSecurity,
   type PendingSecurity, type PermissionSet, type SecuritySpec,
@@ -115,6 +116,8 @@ interface OpenDoc {
   text: TextCache;
   /** The file as it is on disk (needed for signatures, which cover exact bytes). */
   bytes: Uint8Array;
+  /** SHA-256 of `bytes`, worked out when first asked for. */
+  fingerprint?: { bytes: Uint8Array; hex: string };
   /** Set by operations that can't be undone (e.g. flattening), so the tab still shows unsaved changes. */
   dirtyOutsideJournal?: boolean;
   /** Changes counted for `changeStamp`: every edit, undo, redo and change made outside the journal. */
@@ -318,12 +321,7 @@ export class PdfEngine {
    */
   textSource(docId: number): { bytes: Uint8Array; revision: number; missing: number } | null {
     const entry = this.get(docId);
-    const pdf = entry.doc.asPDF();
-    if (!pdf || entry.hasOpenPassword) return null;
-    const unchanged =
-      !entry.dirtyOutsideJournal && !entry.requireFullSave && !entry.saveOptions && !entry.pendingSecurity &&
-      safe(() => pdf.getJournal().position, 0) === entry.savedPosition;
-    if (!unchanged) return null;
+    if (!this.unchangedOnDisk(entry)) return null;
     const missing = entry.doc.countPages() - entry.text.plain.size;
     return { bytes: entry.bytes, revision: entry.text.revision, missing };
   }
@@ -339,6 +337,63 @@ export class PdfEngine {
     if (this.plainText(docId, from) !== texts[0]) return false;
     texts.forEach((t, i) => this.keepPlain(entry, from + i, t));
     return true;
+  }
+
+  /** True when `bytes` hold exactly what's open (no changes since opening or saving) and no password protects it. */
+  private unchangedOnDisk(entry: OpenDoc): boolean {
+    const pdf = entry.doc.asPDF();
+    if (!pdf || entry.hasOpenPassword) return false;
+    return (
+      !entry.dirtyOutsideJournal && !entry.requireFullSave && !entry.saveOptions && !entry.pendingSecurity &&
+      safe(() => pdf.getJournal().position, 0) === entry.savedPosition
+    );
+  }
+
+  /**
+   * Identifies the file's exact contents, so page text saved to disk is only ever used for the same file.
+   * Null when the document has changed since it was opened or saved, or needs a password (its text stays private).
+   */
+  async textFingerprint(docId: number): Promise<string | null> {
+    const entry = this.get(docId);
+    if (!this.unchangedOnDisk(entry)) return null;
+    if (entry.fingerprint?.bytes === entry.bytes) return entry.fingerprint.hex;
+    const bytes = entry.bytes;
+    const hex = await sha256Hex(bytes);
+    entry.fingerprint = { bytes, hex };
+    return hex;
+  }
+
+  /** Every page's plain text, for saving. Null unless all of it has been read and the file is unchanged. */
+  allPlainText(docId: number): string[] | null {
+    const entry = this.get(docId);
+    if (!this.unchangedOnDisk(entry)) return null;
+    const count = entry.doc.countPages();
+    const texts: string[] = new Array(count);
+    for (let p = 0; p < count; p++) {
+      const t = entry.text.get(p)?.text ?? entry.text.plain.get(p);
+      if (t === undefined) return null;
+      texts[p] = t;
+    }
+    return texts;
+  }
+
+  /**
+   * Takes page text saved earlier for this file: `data` is `allPlainText` packed by `packPlainText`, or the texts
+   * themselves. "rejected" if it's damaged, doesn't match the page count or fails a spot check against the open file
+   * (so it should be thrown away); "changed" if the document changed meanwhile.
+   */
+  async importPlainText(docId: number, data: Uint8Array | string[]): Promise<"loaded" | "rejected" | "changed"> {
+    const entry = this.get(docId);
+    if (!this.unchangedOnDisk(entry)) return "changed";
+    const revision = entry.text.revision;
+    // Unpacked here rather than in a helper: handing 17,000 pages of text between threads costs more than unpacking.
+    const texts = Array.isArray(data) ? data : await unpackPlainText(data);
+    if (!this.docs.has(docId) || entry.text.revision !== revision || !this.unchangedOnDisk(entry)) return "changed";
+    const count = entry.doc.countPages();
+    if (!texts || texts.length !== count || !count) return "rejected";
+    for (const p of new Set([0, count >> 1, count - 1])) if (this.plainText(docId, p) !== texts[p]) return "rejected";
+    texts.forEach((t, p) => this.keepPlain(entry, p, t));
+    return "loaded";
   }
 
   /** The first page from `from` (before `to`) whose plain text hasn't been read yet, or `to`. */

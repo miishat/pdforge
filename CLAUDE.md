@@ -13,3 +13,6 @@
 - Releases: `npm run release -- X.Y.Z`, then `git push origin main`; a new version on main makes
   `.github/workflows/release.yml` tag, build and publish it (tag pushes are blocked from cloud sessions). It signs with the `TAURI_SIGNING_PRIVATE_KEY` secret (public key in `tauri.conf.json`). Never commit the private key.
   Everyday CI builds use `src-tauri/tauri.ci.conf.json`, which turns off updater signing.
+- Windows-only Rust (`src-tauri/src/shell.rs`) can't be built here (no MSVC tools). Type-check it by copying its `imp`
+  module into a scratch crate that depends only on the same `windows` version, with `cargo check --target
+  x86_64-pc-windows-msvc`; CI's Windows build is the real check.

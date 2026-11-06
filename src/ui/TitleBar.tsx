@@ -1,5 +1,6 @@
 import { Add16Regular, Dismiss16Regular, Square16Regular, Subtract16Regular, LockClosed12Regular } from "@fluentui/react-icons";
-import { isDesktop, windowAction } from "../platform";
+import { useEffect, useRef } from "react";
+import { isDesktop, showSnapLayouts, windowAction } from "../platform";
 import { Mark } from "./Mark";
 import type { Tab } from "./useTabs";
 
@@ -11,7 +12,18 @@ interface Props {
   onNew: () => void;
 }
 
+/** How long the pointer rests on maximize before the Snap Layouts flyout opens (about what Windows 11 waits). */
+const SNAP_HOVER_MS = 500;
+
 export function TitleBar({ tabs, activeId, onActivate, onClose, onNew }: Props) {
+  // PDForge draws its own maximize button, so Windows can't show Snap Layouts over it by itself.
+  const snapTimer = useRef<number | undefined>(undefined);
+  const cancelSnap = () => window.clearTimeout(snapTimer.current);
+  const armSnap = () => {
+    cancelSnap();
+    snapTimer.current = window.setTimeout(() => void showSnapLayouts(), SNAP_HOVER_MS);
+  };
+  useEffect(() => cancelSnap, []);
   return (
     <header className="titlebar" data-tauri-drag-region>
       <div className="titlebar__brand" data-tauri-drag-region>
@@ -58,7 +70,13 @@ export function TitleBar({ tabs, activeId, onActivate, onClose, onNew }: Props) 
           <button aria-label="Minimize" onClick={() => windowAction("minimize")}>
             <Subtract16Regular />
           </button>
-          <button aria-label="Maximize" onClick={() => windowAction("toggleMaximize")}>
+          <button
+            aria-label="Maximize"
+            onClick={() => (cancelSnap(), void windowAction("toggleMaximize"))}
+            onPointerEnter={armSnap}
+            onPointerLeave={cancelSnap}
+            onPointerDown={cancelSnap}
+          >
             <Square16Regular />
           </button>
           <button className="window-controls__close" aria-label="Close" onClick={() => windowAction("close")}>

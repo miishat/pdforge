@@ -22,6 +22,17 @@ serde_json = "1"
 tauri-plugin-updater = "=2.14.0"
 tauri-plugin-process = "=2.4.0"
 
+# Snap Layouts, the taskbar jump list and default-app registration (src/shell.rs). Same version Tauri uses.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_Registry",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
 [profile.release]
 codegen-units = 1
 lto = true

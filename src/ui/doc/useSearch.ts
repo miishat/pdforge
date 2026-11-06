@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { engine } from "../../core/client";
 import { ensureTextIndex, stopTextIndex } from "./textIndex";
+import { loadSavedText, saveText } from "./savedText";
 import type { SearchHit, SearchOptions } from "../../core/types";
 
 const MAX_HITS = 5000;
@@ -47,7 +48,12 @@ export function useSearch(docId: number, pageCount: number, startPage: () => num
       const from = Math.max(0, Math.min(pageCount - 1, startPage()));
       (async () => {
         // On a large document the first search reads every page's text; helper workers do that in parallel.
+        // Text saved from an earlier session comes first; it makes the helpers unnecessary.
+        await loadSavedText(docId, pageCount).catch(() => false);
+        if (token.current !== my) return;
         const index = await ensureTextIndex(docId, pageCount, from).catch(() => null);
+        // Once every page has been read, save the text so the next session's first search is instant too.
+        if (index) void index.finished.then(() => index.complete && saveText(docId, pageCount)).catch(() => {});
         // Search from the reader's page to the end, then wrap around, so nearby results come first.
         // `head` holds hits before the start page and `tail` the rest; the list shown is head + tail, in page order.
         const head: SearchHit[] = [];
@@ -103,7 +109,10 @@ export function useSearch(docId: number, pageCount: number, startPage: () => num
               if (tail.length || head.length) picked = true;
             }
             if (truncated) return;
-            if (done) return;
+            if (done) {
+              if (!index) void saveText(docId, pageCount).catch(() => {});
+              return;
+            }
             // Yield so the UI stays responsive between batches.
             await new Promise((res) => setTimeout(res, 0));
           }

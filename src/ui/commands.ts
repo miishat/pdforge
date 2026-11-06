@@ -40,6 +40,8 @@ export const COMMANDS: CommandDef[] = [
   { id: "window.checkUpdates", label: "Check for updates…", category: "Window", keys: [], keywords: "update upgrade new version release download install" },
   { id: "window.autoUpdates", label: "Turn automatic update checks on or off", category: "Window", keys: [], keywords: "update upgrade settings" },
   { id: "window.shortcuts", label: "Keyboard shortcuts…", category: "Window", keys: [], keywords: "keymap rebind vim settings" },
+  { id: "window.clearSearchData", label: "Clear saved search data", category: "Window", keys: [], keywords: "search index cache text privacy disk space delete" },
+  { id: "window.defaultApp", label: "Make PDForge the default PDF app…", category: "Window", keys: [], keywords: "default app file association open pdf windows settings" },
   { id: "window.assistant", label: "Assistant…", category: "Window", keys: [], keywords: "ai summarize ask question claude" },
   // View
   { id: "view.zoomIn", label: "Zoom in", category: "View", keys: ["Ctrl+Plus"], inInput: true },
