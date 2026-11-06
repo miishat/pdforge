@@ -359,9 +359,9 @@ export interface AvailableUpdate {
   install(onProgress: (done: number, total: number | null) => void): Promise<void>;
 }
 
-/** The installed version, e.g. "0.2.0". */
+/** The installed version, e.g. "0.2.0" (in the browser build, the version it was built from). */
 export async function appVersion(): Promise<string> {
-  if (!isDesktop) return "dev";
+  if (!isDesktop) return (await import("../../package.json")).version;
   const { getVersion } = await import("@tauri-apps/api/app");
   return getVersion();
 }

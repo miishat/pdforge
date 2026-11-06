@@ -44,7 +44,10 @@ export class DocData {
   readonly bitmaps = new PageBitmaps();
   private rendering = new Map<string, Inflight>();
 
-  constructor(readonly docId: number) {}
+  constructor(readonly docId: number) {
+    // Lets the drawing helpers take some of this document's pages while it's unchanged.
+    if (typeof Worker === "function") engine().shareForDrawing(docId);
+  }
 
   /**
    * A page bitmap: from the cache, or rendered (once, however many ask) and kept. `kind` "preview" renders a small

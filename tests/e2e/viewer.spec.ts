@@ -13,6 +13,10 @@ test("start screen offers to open a file", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("button", { name: /Open a PDF/ })).toBeVisible();
   await expect(page.getByText(/^Or drag files here\./)).toBeVisible();
+  // The version, at the bottom of the window (the start screen fills it).
+  await expect(page.locator(".start__footer")).toHaveText(/^PDForge \d+\.\d+\.\d+/);
+  const box = (await page.locator(".start").boundingBox())!;
+  expect(box.y + box.height).toBeGreaterThan(page.viewportSize()!.height - 2);
 });
 
 test("opens a PDF and renders the first page", async ({ page }) => {

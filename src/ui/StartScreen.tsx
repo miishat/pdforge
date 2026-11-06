@@ -14,9 +14,12 @@ interface Props {
   recoveries: { key: string; meta: RecoveryMeta }[];
   onRecover: (r: { key: string; meta: RecoveryMeta }) => void;
   onDiscardRecovery: (r: { key: string; meta: RecoveryMeta }) => void;
+  /** The installed version, once known (desktop app only). */
+  version?: string | null;
+  onCheckUpdates?: () => void;
 }
 
-export function StartScreen({ recent, missing, onOpen, onCreate, onOpenRecent, onRemoveRecent, recoveries, onRecover, onDiscardRecovery }: Props) {
+export function StartScreen({ recent, missing, onOpen, onCreate, onOpenRecent, onRemoveRecent, recoveries, onRecover, onDiscardRecovery, version, onCheckUpdates }: Props) {
   return (
     <main className="start">
       <div className={`start__inner ${recent.length || recoveries.length ? "start__inner--with-recent" : ""}`}>
@@ -82,6 +85,17 @@ export function StartScreen({ recent, missing, onOpen, onCreate, onOpenRecent, o
           </section>
         )}
       </div>
+      {version && (
+        <footer className="start__footer">
+          <span>PDForge {version}</span>
+          {onCheckUpdates && (
+            <>
+              <span aria-hidden="true">·</span>
+              <button className="link-button" onClick={onCheckUpdates}>Check for updates</button>
+            </>
+          )}
+        </footer>
+      )}
     </main>
   );
 }

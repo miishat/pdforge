@@ -141,7 +141,26 @@ interface OpenDoc {
    * earlier successful authentication, so it must not be called afterwards.
    */
   hasOpenPassword: boolean;
+  /** A layer was shown or hidden: pages no longer draw the way the file alone would. */
+  layersChanged?: boolean;
 }
+
+/** Files larger than this aren't copied to the drawing helpers (each helper would hold its own copy). */
+export const DRAWING_COPY_MAX_BYTES = 300 * 1024 * 1024;
+
+/** Numbers each distinct `bytes` array an open document has had, so helpers can tell whether their copy is current. */
+const bytesStamps = new WeakMap<Uint8Array, number>();
+let nextBytesStamp = 1;
+function stampOf(bytes: Uint8Array): number {
+  let s = bytesStamps.get(bytes);
+  if (s === undefined) bytesStamps.set(bytes, (s = nextBytesStamp++));
+  return s;
+}
+
+/** What `drawingSource` reports: whether a copy of the file draws exactly what's open, and the copy if needed. */
+export type DrawingSource =
+  | { shareable: false }
+  | { shareable: true; stamp: number; bytes?: Uint8Array };
 
 export interface SecurityState {
   encrypted: boolean;
@@ -189,6 +208,36 @@ export class PdfEngine {
     this.docs.set(docId, { doc, text: new TextCache(), bytes, savedPosition: 0, ownerAccess: !isEncrypted(doc), hasOpenPassword });
     if (hasOpenPassword) return { status: "needs-password", docId };
     return { status: "ok", info: this.info(docId) };
+  }
+
+  /**
+   * Opens a file only for drawing its pages (in a drawing helper): no undo journal and no page list, so it's quick
+   * even for thousands of pages. Returns the document's id in this engine.
+   */
+  openForDrawing(bytes: Uint8Array): number {
+    let doc: mupdf.Document;
+    try {
+      doc = mupdf.Document.openDocument(bytes, "application/pdf");
+    } catch (err) {
+      throw new EngineError(`This file couldn't be opened as a PDF (${errText(err)}).`, "invalid-file");
+    }
+    const docId = this.nextId++;
+    this.docs.set(docId, { doc, text: new TextCache(), bytes, savedPosition: 0, ownerAccess: true, hasOpenPassword: doc.needsPassword() });
+    return docId;
+  }
+
+  /**
+   * For drawing pages in helper workers: whether a copy of the file on disk draws exactly what's open (no changes
+   * since opening or saving, no password, no layers switched). `knownStamp` is the copy the helpers already have;
+   * the bytes are included only when it's out of date (and the file isn't too large to copy).
+   */
+  drawingSource(docId: number, knownStamp: number | null): DrawingSource {
+    const entry = this.get(docId);
+    if (entry.layersChanged || !this.unchangedOnDisk(entry)) return { shareable: false };
+    const stamp = stampOf(entry.bytes);
+    if (stamp === knownStamp) return { shareable: true, stamp };
+    if (entry.bytes.length > DRAWING_COPY_MAX_BYTES) return { shareable: false };
+    return { shareable: true, stamp, bytes: entry.bytes.slice() };
   }
 
   /** Returns document info if the password is right; throws `bad-password` otherwise. */
@@ -507,6 +556,7 @@ export class PdfEngine {
 
   setLayerVisible(docId: number, index: number, visible: boolean): void {
     this.pdf(docId)?.setLayerVisible(index, visible);
+    this.get(docId).layersChanged = true;
   }
 
   /** Annotations on the given pages (all pages when omitted), excluding links, widgets and popups. */
@@ -1471,23 +1521,49 @@ export function renderMatrix(scale: number, rotation: ViewRotation): mupdf.Matri
   return mupdf.Matrix.concat(mupdf.Matrix.scale(scale, scale), mupdf.Matrix.rotate(rotation));
 }
 
-function rgbToRgba(pix: mupdf.Pixmap): Uint8ClampedArray {
-  const width = pix.getWidth();
-  const height = pix.getHeight();
-  const stride = pix.getStride();
-  const rgb = pix.getPixels();
+const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
+
+/** MuPDF draws RGB; canvases want RGBA. Opaque pages, so alpha is always 255. */
+export function rgbToRgba(pix: mupdf.Pixmap): Uint8ClampedArray {
+  return rgbBytesToRgba(pix.getPixels(), pix.getWidth(), pix.getHeight(), pix.getStride());
+}
+
+export function rgbBytesToRgba(rgb: Uint8Array | Uint8ClampedArray, width: number, height: number, stride: number): Uint8ClampedArray {
   const rgba = new Uint8ClampedArray(width * height * 4);
+  if (!width || !height) return rgba;
+  if (!LITTLE_ENDIAN) {
+    for (let y = 0; y < height; y++) {
+      let src = y * stride;
+      let dst = y * width * 4;
+      for (let x = 0; x < width; x++, src += 3, dst += 4) {
+        rgba[dst] = rgb[src];
+        rgba[dst + 1] = rgb[src + 1];
+        rgba[dst + 2] = rgb[src + 2];
+        rgba[dst + 3] = 255;
+      }
+    }
+    return rgba;
+  }
+  const out = new Uint32Array(rgba.buffer);
+  const pixels = width * height;
+  // Rows packed back to back, starting on a 4-byte boundary (MuPDF's usual layout): read 4 pixels from 3 words.
+  if (stride === width * 3 && rgb.byteOffset % 4 === 0) {
+    const src = new Uint32Array(rgb.buffer, rgb.byteOffset, Math.floor((pixels * 3) / 4));
+    let s = 0;
+    let d = 0;
+    for (const end = pixels - 3; d < end; d += 4, s += 3) {
+      const a = src[s], b = src[s + 1], c = src[s + 2];
+      out[d] = 0xff000000 | a;
+      out[d + 1] = 0xff000000 | (a >>> 24) | (b << 8);
+      out[d + 2] = 0xff000000 | (b >>> 16) | (c << 16);
+      out[d + 3] = 0xff000000 | (c >>> 8);
+    }
+    for (let i = d * 3; d < pixels; d++, i += 3) out[d] = 0xff000000 | (rgb[i + 2] << 16) | (rgb[i + 1] << 8) | rgb[i];
+    return rgba;
+  }
   for (let y = 0; y < height; y++) {
     let src = y * stride;
-    let dst = y * width * 4;
-    for (let x = 0; x < width; x++) {
-      rgba[dst] = rgb[src];
-      rgba[dst + 1] = rgb[src + 1];
-      rgba[dst + 2] = rgb[src + 2];
-      rgba[dst + 3] = 255;
-      src += 3;
-      dst += 4;
-    }
+    for (let d = y * width, end = d + width; d < end; d++, src += 3) out[d] = 0xff000000 | (rgb[src + 2] << 16) | (rgb[src + 1] << 8) | rgb[src];
   }
   return rgba;
 }

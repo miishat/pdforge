@@ -31,6 +31,13 @@ Legend: ✅ done and tested · 🟡 partial · ⬜ not started
   direction of travel are drawn ahead, plus previews for 12 more ahead and 4 behind, one at a time so they never
   hold up the page you scroll to. 17,000-page file, far jumps: something on screen in about 13 ms (was about 86 ms),
   sharp in about 50 ms
+- ✅ Three engines draw pages at once: the main one plus two drawing helpers (one or none on computers with fewer
+  than 4 cores), each with its own copy of the file. Helpers only draw while what's open is exactly the file on
+  disk (no unsaved changes, no password, no layers switched, at most 300 MB); after any change the main engine
+  draws alone until a check confirms the copy matches again (undo back, or save, which hands over the new file).
+  A helper that fails passes the page back to the main engine. Handing a drawn page over is also quicker (colour
+  conversion about 4 ms instead of 30 ms for a full-screen page). Zoomed out with 7 pages on screen: all sharp in
+  about 34 ms after a jump (was about 108 ms)
 - ✅ Sharp detail tile at very high zoom (base bitmap capped at 12 MP)
 - ✅ Zoom field (type a value) with presets, Automatic / Fit width / Fit page / Actual size; Ctrl+wheel zooms around the cursor
 - ✅ Marquee zoom (Z); rotate view (Ctrl+Shift+Plus/Minus); single, two-page and two-page-with-cover layouts
@@ -185,10 +192,10 @@ close-window prompt (all are desktop-only paths; the browser test build download
 
 ## Updates and releases
 
-- ✅ In-app updates from GitHub Releases: a quiet check a few seconds after start (at most every 6 hours), a notice
+- ✅ In-app updates from GitHub Releases: a quiet check a few seconds after every start, a notice
   with "Update and restart", "What's new" and "Later"; unsaved changes are settled first. Updates are signed and
   PDForge refuses one whose signature doesn't match. "Check for updates…" and "Turn automatic update checks on or
-  off" are in the command palette
+  off" are in the command palette, and the start screen shows the installed version with a "Check for updates" link
 - ✅ Releases: `npm run release -- X.Y.Z` sets the version everywhere and commits it; pushing that to main makes
   the Release workflow test, build, sign, tag and publish the installer with `latest.json` (or run it from the Actions tab)
 - 🟡 The installer isn't code-signed (no Authenticode certificate), so browsers and SmartScreen warn on the first

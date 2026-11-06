@@ -10,9 +10,6 @@ export type UpdateState =
   | { kind: "upToDate"; version: string }
   | { kind: "error"; message: string };
 
-/** How often PDForge looks for a new version on its own. */
-const AUTO_CHECK_EVERY = 6 * 60 * 60 * 1000;
-
 export function autoUpdatesOn(): boolean {
   return load("updates.auto", true);
 }
@@ -21,7 +18,7 @@ export function setAutoUpdates(on: boolean) {
 }
 
 /**
- * Update checks against GitHub Releases. Checks quietly a few seconds after start (at most every few hours);
+ * Update checks against GitHub Releases. Checks quietly a few seconds after every start;
  * a manual check also reports "up to date" and errors.
  */
 export function useUpdates() {
@@ -47,8 +44,8 @@ export function useUpdates() {
   }, []);
 
   useEffect(() => {
+    // Every start: one small request to GitHub, so a new version shows up the next time PDForge opens.
     if (!isDesktop || !autoUpdatesOn()) return;
-    if (Date.now() - load("updates.lastCheck", 0) < AUTO_CHECK_EVERY) return;
     const t = setTimeout(() => void check(false), 4000);
     return () => clearTimeout(t);
   }, [check]);

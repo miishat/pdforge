@@ -3,7 +3,7 @@ import { engine } from "./core/client";
 import type { DocInfo } from "./core/types";
 import {
   fromBrowserFile, isDesktop, launchFiles, onOpenFiles, onWindowCloseRequested, pickFiles, pickPdfs, readPath, recoveryClear, recoveryList,
-  recoveryRead, savedTextStore, addRecentDocument, setWindowTitle, type AvailableUpdate, type PickedFile, type RecoveryMeta,
+  recoveryRead, savedTextStore, addRecentDocument, setWindowTitle, appVersion, type AvailableUpdate, type PickedFile, type RecoveryMeta,
 } from "./platform";
 import { UnsavedDialog } from "./ui/doc/Dialogs";
 import { DocumentView, type DocCommands, type ViewHandle } from "./ui/doc/DocumentView";
@@ -82,6 +82,10 @@ export function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [infoNote, setInfoNote] = useState<string | null>(null);
   const updates = useUpdates();
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    void appVersion().then(setVersion, () => {});
+  }, []);
   const defaultApp = useDefaultAppOffer(updates.state.kind !== "idle");
   const makeDefault = useCallback(async () => {
     setNotice(null);
@@ -422,6 +426,8 @@ export function App() {
           onOpen={openDialog}
           onOpenRecent={(r) => openPaths([r.path])}
           onRemoveRecent={(r) => setRecent((l) => removeRecent(l, r.path))}
+          version={version}
+          onCheckUpdates={isDesktop ? () => void updates.check(true) : undefined}
         />
       )}
       <div className={`workspace ${splitOn ? "workspace--split" : ""}`}>
