@@ -25,6 +25,12 @@ Legend: ✅ done and tested · 🟡 partial · ⬜ not started
 - ✅ Files over 1.5 GB are refused straight away with a message saying why (the PDF engine has 2 GB of working memory,
   and the whole file must fit in it)
 - ✅ Prioritized, cancellable render queue (visible pages first, stale renders dropped)
+- ✅ Pages never show blank while you scroll: each page first shows a small preview (400 px, a few ms to draw),
+  then sharpens. Recently drawn pages are kept (up to 128 MB of sharp pages, about 10–20 at screen size, and 64 MB
+  of previews, about 130 pages), so scrolling back is instant. When scrolling pauses, the next 3 pages in the
+  direction of travel are drawn ahead, plus previews for 12 more ahead and 4 behind, one at a time so they never
+  hold up the page you scroll to. 17,000-page file, far jumps: something on screen in about 13 ms (was about 86 ms),
+  sharp in about 50 ms
 - ✅ Sharp detail tile at very high zoom (base bitmap capped at 12 MP)
 - ✅ Zoom field (type a value) with presets, Automatic / Fit width / Fit page / Actual size; Ctrl+wheel zooms around the cursor
 - ✅ Marquee zoom (Z); rotate view (Ctrl+Shift+Plus/Minus); single, two-page and two-page-with-cover layouts

@@ -3,9 +3,10 @@ import { caretAt, charRect, hitRects, lineAt, wordAt } from "../../core/textlaye
 import type { DocInfo, LinkInfo, Rect, SearchHit, ViewRotation } from "../../core/types";
 import { rotatedSize, toPage, toView } from "../geometry";
 import { GAP, layoutPages, pagesInRange, rowAt, type Layout, type LayoutMode } from "../layout";
-import { useDocData, type DocData } from "./docData";
+import { PREFETCH_PRIORITY, useDocData, type DocData } from "./docData";
+import { previewScale } from "./pageCache";
 import { SELECTION_TOOLS, type AnnotTool } from "./tools";
-import { PageView, type PageOverlay } from "./PageView";
+import { baseScaleFor, PageView, type PageOverlay } from "./PageView";
 import { selectionRects, type TextSelection } from "./selection";
 
 export type Tool = "select" | "hand" | "snapshot" | "marquee" | AnnotTool;
@@ -64,6 +65,11 @@ type Drag =
   | { kind: "area"; tool: "snapshot" | "marquee"; page: number; x0: number; y0: number; x1: number; y1: number };
 
 const OVERSCAN = 1; // viewports above and below to keep rendered
+/** Drawing ahead, after scrolling pauses for this long: sharp pages past the mounted ones, then previews. */
+const DRAW_AHEAD_DELAY_MS = 150;
+const DRAW_AHEAD_PAGES = 3;
+const PREVIEW_AHEAD_PAGES = 12;
+const PREVIEW_BEHIND_PAGES = 4;
 
 export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(props, ref) {
   const { info, data, active, scale, rotation, mode, tool, readingMode, renderVersion, hits, currentHit, selection } = props;
@@ -249,6 +255,41 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(props, ref
     const bottom = scroll.top + viewport.height * (1 + OVERSCAN);
     return pagesInRange(layout, top, bottom);
   }, [active, layout, scroll.top, viewport.height]);
+
+  // Draw ahead: once scrolling pauses, the next pages in the direction of travel are drawn into the page cache
+  // (sharp), and previews for a wider stretch both ways, so they appear at once when they come into view.
+  const lastTop = useRef(0);
+  const direction = useRef<1 | -1>(1);
+  useEffect(() => {
+    if (!active || !pages.length) return;
+    if (scroll.top !== lastTop.current) direction.current = scroll.top > lastTop.current ? 1 : -1;
+    lastTop.current = scroll.top;
+    const ctrl = new AbortController();
+    const timer = setTimeout(async () => {
+      const dir = direction.current;
+      const edge = dir > 0 ? pages[pages.length - 1] : pages[0];
+      const back = dir > 0 ? pages[0] : pages[pages.length - 1];
+      const version = (i: number) => renderVersion * 10_000_000 + data.renderKey(i);
+      const queue: [number, "sharp" | "preview"][] = [];
+      for (let k = 1; k <= DRAW_AHEAD_PAGES; k++) queue.push([edge + dir * k, "sharp"]);
+      for (let k = 1; k <= PREVIEW_AHEAD_PAGES; k++) queue.push([edge + dir * k, "preview"]);
+      for (let k = 1; k <= PREVIEW_BEHIND_PAGES; k++) queue.push([back - dir * k, "preview"]);
+      // One at a time: the engine draws one page at once, so a page the reader scrolls to next waits for at most
+      // one page drawn ahead.
+      for (const [i, kind] of queue) {
+        if (ctrl.signal.aborted) return;
+        if (i < 0 || i >= info.pageCount) continue;
+        const size = rotatedSize(info.pages[i], rotation);
+        const s = baseScaleFor(info.pages[i], rotation, layout.boxes[i].w / size.width, dpr);
+        if (kind === "preview" && s <= previewScale(size.width, size.height) * 1.5) continue;
+        await data.pageBitmap(kind, i, size, s, rotation, version(i), PREFETCH_PRIORITY, ctrl.signal).catch(() => {});
+      }
+    }, DRAW_AHEAD_DELAY_MS);
+    return () => {
+      clearTimeout(timer);
+      ctrl.abort();
+    };
+  }, [active, pages, scroll.top, data, info, layout, rotation, dpr, renderVersion]);
 
   // Prefetch text for visible pages so selection and cursor feedback are instant.
   useEffect(() => {

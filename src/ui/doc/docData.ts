@@ -1,10 +1,21 @@
 // Per-document caches of data fetched from the engine (text layers, links, annotations, form fields),
 // shared by all views of a tab. Edits invalidate the affected pages.
 import { useSyncExternalStore } from "react";
-import { engine } from "../../core/client";
-import type { AnnotationInfo, LinkInfo, TextLayer } from "../../core/types";
+import { CancelledError, engine } from "../../core/client";
+import type { AnnotationInfo, LinkInfo, TextLayer, ViewRotation } from "../../core/types";
+import { PageBitmaps, previewScale } from "./pageCache";
 import type { WidgetInfo } from "../../core/forms";
 import type { ImageInfo, TextLine } from "../../core/content";
+
+/** Render priorities: previews before anything else, drawing ahead after everything else. */
+export const PREVIEW_PRIORITY = -1000;
+export const PREFETCH_PRIORITY = 1000;
+
+interface Inflight {
+  promise: Promise<ImageBitmap>;
+  ctrl: AbortController;
+  users: number;
+}
 
 /** Text layers kept per document; far more than fit on screen at once. */
 const TEXT_LAYERS_KEPT = 120;
@@ -29,7 +40,94 @@ export class DocData {
   pageVersions = new Map<number, number>();
   globalVersion = 0;
 
+  /** Recently drawn pages and their previews (see pageCache.ts). */
+  readonly bitmaps = new PageBitmaps();
+  private rendering = new Map<string, Inflight>();
+
   constructor(readonly docId: number) {}
+
+  /**
+   * A page bitmap: from the cache, or rendered (once, however many ask) and kept. `kind` "preview" renders a small
+   * stand-in; `scale` is then the page's sharp scale, used only to skip previews that wouldn't be smaller.
+   * The returned bitmap belongs to the cache: draw it, don't close it. Rejects with CancelledError if `signal` aborts.
+   */
+  pageBitmap(
+    kind: "sharp" | "preview",
+    page: number,
+    size: { width: number; height: number },
+    scale: number,
+    rotation: ViewRotation,
+    version: number,
+    priority: number,
+    signal?: AbortSignal,
+  ): Promise<ImageBitmap> {
+    const cache = kind === "sharp" ? this.bitmaps.sharp : this.bitmaps.previews;
+    const renderScale = kind === "sharp" ? scale : Math.min(scale, previewScale(size.width, size.height));
+    const key = kind === "sharp" ? this.bitmaps.sharpKey(page, scale, rotation, version) : this.bitmaps.previewKey(page, rotation, version);
+    const hit = cache.get(key);
+    if (hit) return Promise.resolve(hit);
+    if (signal?.aborted) return Promise.reject(new CancelledError());
+    let job = this.rendering.get(key);
+    if (!job) {
+      const ctrl = new AbortController();
+      const promise = engine()
+        .render({ docId: this.docId, pageIndex: page, scale: renderScale, rotation }, priority, ctrl.signal)
+        .then(async ({ bitmap }) => {
+          cache.put(key, bitmap);
+          // Every sharp page also leaves a preview behind, so it never looks blank when it comes back.
+          const pk = this.bitmaps.previewKey(page, rotation, version);
+          if (kind === "sharp" && !this.bitmaps.previews.has(pk) && typeof createImageBitmap === "function") {
+            const ps = previewScale(size.width, size.height) / renderScale;
+            if (ps < 1) {
+              const small = await createImageBitmap(bitmap, {
+                resizeWidth: Math.max(1, Math.round(bitmap.width * ps)),
+                resizeHeight: Math.max(1, Math.round(bitmap.height * ps)),
+                resizeQuality: "medium",
+              }).catch(() => null);
+              if (small) this.bitmaps.previews.put(pk, small);
+            }
+          }
+          return cache.get(key) ?? bitmap;
+        })
+        .finally(() => {
+          if (this.rendering.get(key) === job) this.rendering.delete(key);
+        });
+      job = { promise, ctrl, users: 0 };
+      this.rendering.set(key, job);
+    }
+    const j = job;
+    j.users++;
+    return new Promise<ImageBitmap>((resolve, reject) => {
+      let settled = false;
+      const onAbort = () => {
+        if (settled) return;
+        settled = true;
+        // The render is dropped (if it hasn't started) only when nobody else is waiting for it.
+        if (--j.users === 0) {
+          j.ctrl.abort();
+          if (this.rendering.get(key) === j) this.rendering.delete(key);
+        }
+        reject(new CancelledError());
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      j.promise.then(
+        (b) => {
+          if (settled) return;
+          settled = true;
+          j.users--;
+          signal?.removeEventListener("abort", onAbort);
+          resolve(b);
+        },
+        (err) => {
+          if (settled) return;
+          settled = true;
+          j.users--;
+          signal?.removeEventListener("abort", onAbort);
+          reject(err);
+        },
+      );
+    });
+  }
 
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
@@ -199,6 +297,7 @@ export class DocData {
         this.text.clear();
         this.textReady.clear();
       }
+      this.bitmaps.clear();
       this.globalVersion++;
     } else {
       for (const p of pages) {
@@ -212,6 +311,7 @@ export class DocData {
           this.textReady.delete(p);
         }
         this.pageVersions.set(p, (this.pageVersions.get(p) ?? 0) + 1);
+        this.bitmaps.forgetPage(p);
         // Keep the stale lists until fresh ones arrive, so overlays don't flicker.
         void this.pageAnnots(p);
         void this.pageWidgets(p);

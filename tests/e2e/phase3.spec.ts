@@ -153,7 +153,8 @@ test.describe("edit", () => {
     await page.getByRole("menuitem", { name: "Watermark…" }).click();
     await page.getByLabel("Watermark text").fill("DRAFT COPY");
     await page.getByRole("dialog", { name: "Watermark" }).getByRole("button", { name: "Apply" }).click();
-    expect(await findPage(page, "Page 3 of 5")).toBe("3");
+    // The jump to a hit can land a moment after the result count shows, so ask again until it settles.
+    await expect.poll(() => findPage(page, "Page 3 of 5")).toBe("3");
     expect(await findPage(page, "DRAFT COPY")).not.toBeNull();
     await page.getByRole("button", { name: "Page design" }).click();
     await page.getByRole("menuitem", { name: "Remove watermark" }).click();

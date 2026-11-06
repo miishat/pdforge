@@ -2,11 +2,18 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { CancelledError, engine } from "../../core/client";
 import type { LinkInfo, PageSize, Rect, ViewRotation } from "../../core/types";
 import { rectToView, rotatedSize } from "../geometry";
-import type { DocData } from "./docData";
+import { PREVIEW_PRIORITY, type DocData } from "./docData";
+import { previewScale } from "./pageCache";
 
 /** Keep page bitmaps under this many device pixels; beyond it, a viewport-sized detail tile adds sharpness. */
 const MAX_BASE_PIXELS = 12_000_000;
 const MAX_BASE_DIM = 8192;
+
+/** The scale a page's whole-page bitmap is drawn at: its on-screen size in device pixels, capped. */
+export function baseScaleFor(size: PageSize, rotation: ViewRotation, scale: number, dpr: number): number {
+  const view = rotatedSize(size, rotation);
+  return Math.min(scale * dpr, Math.sqrt(MAX_BASE_PIXELS / (view.width * view.height)), MAX_BASE_DIM / Math.max(view.width, view.height));
+}
 
 export interface PageOverlay {
   /** Search hit rectangles in page space; `current` marks the active hit. */
@@ -44,26 +51,52 @@ export const PageView = memo(function PageView(props: Props) {
 
   const view = rotatedSize(size, rotation);
   const target = scale * dpr;
-  const baseScale = Math.min(target, Math.sqrt(MAX_BASE_PIXELS / (view.width * view.height)), MAX_BASE_DIM / Math.max(view.width, view.height));
+  const baseScale = baseScaleFor(size, rotation, scale, dpr);
   const needsDetail = baseScale < target * 0.98;
 
-  // Base bitmap of the whole page. While zooming, the previous bitmap stays visible (stretched).
+  // Base bitmap of the whole page. While zooming, the previous bitmap stays visible (stretched). A page coming into
+  // view shows a recently drawn copy at once if there is one; otherwise a small preview first, then the sharp bitmap.
+  const shown = useRef<string | null>(null);
   useEffect(() => {
     const canvas = baseRef.current!;
     const key = `${baseScale.toFixed(4)}|${rotation}|${renderVersion}`;
     if (rendered.current === key) return;
+    const draw = (bitmap: ImageBitmap, state: "true" | "preview") => {
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
+      canvas.dataset.rendered = state;
+    };
+    const content = `${rotation}|${renderVersion}`;
+    const cached = data.bitmaps.sharp.get(data.bitmaps.sharpKey(index, baseScale, rotation, renderVersion));
+    if (cached) {
+      draw(cached, "true");
+      rendered.current = key;
+      shown.current = content;
+      return;
+    }
     const ctrl = new AbortController();
+    let sharp = false;
+    // Nothing of this content on the canvas yet (new page, edit or rotation): a preview stands in meanwhile.
+    if (shown.current !== content && baseScale > previewScale(view.width, view.height) * 1.5) {
+      data
+        .pageBitmap("preview", index, view, baseScale, rotation, renderVersion, PREVIEW_PRIORITY + priority, ctrl.signal)
+        .then((b) => {
+          if (sharp) return;
+          draw(b, "preview");
+          shown.current = content;
+        })
+        .catch(() => {});
+    }
     const delay = rendered.current === null ? 0 : 120;
     const timer = setTimeout(() => {
-      engine()
-        .render({ docId: data.docId, pageIndex: index, scale: baseScale, rotation }, priority, ctrl.signal)
-        .then(({ bitmap }) => {
-          canvas.width = bitmap.width;
-          canvas.height = bitmap.height;
-          canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
-          bitmap.close();
+      data
+        .pageBitmap("sharp", index, view, baseScale, rotation, renderVersion, priority, ctrl.signal)
+        .then((b) => {
+          sharp = true;
+          draw(b, "true");
           rendered.current = key;
-          canvas.dataset.rendered = "true";
+          shown.current = content;
         })
         .catch((err) => {
           if (!(err instanceof CancelledError)) canvas.dataset.rendered = "error";
