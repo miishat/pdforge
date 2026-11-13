@@ -1,6 +1,6 @@
 # PDForge on macOS: plan
 
-Status: planned, not started. Estimate: 2–3 working days, plus one or two rounds of fixes after testing on a real Mac.
+Status: planned, not started (decisions made, see the end). Estimate: 2–3 working days, plus one or two rounds of fixes after testing on a real Mac.
 
 ## Where things stand
 
@@ -67,8 +67,9 @@ WKWebView, the engine behind Safari. Things to check and fix:
   may ignore, leaving full-size "previews" that fill the 64 MB preview cache quickly. Fall back to drawing it smaller
   on a canvas.
 - **Read aloud** (`speechSynthesis`): check it exists in WKWebView and lists the system voices.
-- **Saved search text** uses `CompressionStream`, which needs Safari 16.4 or later. Set the app's minimum macOS
-  version to match (macOS 13, or 12 with an updated Safari).
+- **Saved search text** uses `CompressionStream`, which needs Safari 16.4 or later. Minimum macOS is 12
+  (Monterey); where `CompressionStream` is missing (an older Safari), saving search text is skipped rather than
+  failing, and searching still works.
 - **Scrollbars.** macOS hides scrollbars until you scroll; check that our styled scrollbars stay visible and
   draggable, since dragging the scrollbar is a main way to move through long files.
 - **Retina screens.** Pages are drawn at twice the pixels per side (four times the memory), so the 128 MB page cache
@@ -86,13 +87,14 @@ includes a WebKit build close to Safari's). Fix what fails there first; most eng
   upload to the same GitHub release, and `latest.json` gets a Mac entry next to the Windows one, so the in-app updater
   works on both from the same release. The updater uses the same signing key (`TAURI_SIGNING_PRIVATE_KEY`).
 - **Download.** A `.dmg` to drag into Applications.
-- **Which Mac.** Build for Apple Silicon, Intel or both (a "universal" app runs on both but is twice the size).
+- **Which Mac.** Apple Silicon only (`aarch64-apple-darwin`), built on GitHub's Apple Silicon runners. Intel can be
+  added later as a second target.
 
-## 6. Getting past Gatekeeper (a choice, not work)
+## 6. Getting past Gatekeeper (decided: free)
 
-macOS checks that downloaded apps come from a known developer. Two options:
+macOS checks that downloaded apps come from a known developer. Two options; **we're going with the free one**:
 
-- **Free.** The app isn't notarized. The first time you open it, macOS refuses. On macOS 15 and later: System
+- **Free (chosen).** The app isn't notarized. The first time you open it, macOS refuses. On macOS 15 and later: System
   Settings → Privacy & Security → "Open Anyway". On earlier versions: right-click the app → Open. Once only; updates
   installed by PDForge itself don't trigger it again.
 - **$99 a year** (Apple Developer Program). The app is signed and notarized in CI and opens like any other app. Needs
@@ -119,8 +121,9 @@ After a CI build, install it and check, in about 15 minutes:
 3. macOS build in CI (5), then you test it on your Mac (checklist above).
 4. One round of fixes from that; then add the Mac to the release workflow and publish.
 
-## Decisions needed before starting
+## Decisions
 
-- **Apple Silicon or Intel** (or both)?
-- **Which macOS version** is on your Mac? (Decides the minimum version, see section 4.)
-- **Free with "Open Anyway" once, or $99 a year** for notarization?
+- **Mac:** Apple Silicon only.
+- **Gatekeeper:** free; "Open Anyway" in System Settings once, the first time.
+- **Minimum macOS:** 12 (Monterey). Every Apple Silicon Mac can run 12 or later; to check yours: Apple menu → About
+  This Mac. If it's on 11 (Big Sur), update it, or tell me and the minimum can go down to 11.
