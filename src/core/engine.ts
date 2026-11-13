@@ -163,6 +163,14 @@ export type DrawingSource =
   | { shareable: false }
   | { shareable: true; stamp: number; bytes?: Uint8Array };
 
+/** What to find for redaction: one of the presets (by id), or the user's own text or pattern. */
+export interface RedactionQuery {
+  preset?: string;
+  text?: string;
+  regex?: boolean;
+  caseSensitive?: boolean;
+}
+
 export interface SecurityState {
   encrypted: boolean;
   /** e.g. "AES 256-bit". */
@@ -329,7 +337,10 @@ export class PdfEngine {
         }
         line++;
       },
-      onChar(c, _origin, _font, _size, quad) {
+      onChar(c, _origin, font, _size, quad) {
+        // MuPDF hands out a font object per character; free it now; waiting for the garbage collector lets
+        // them pile up (about 170 bytes a character) when many pages are read without a pause.
+        font.destroy();
         chars.push(c);
         quads.push(...quad);
         lines.push(line);
@@ -894,13 +905,36 @@ export class PdfEngine {
     return PRESETS.map(({ id, label }) => ({ id, label }));
   }
 
-  /** Finds text to redact: a preset (by id) or the caller's own text/regex. */
-  findForRedaction(docId: number, query: { preset?: string; text?: string; regex?: boolean; caseSensitive?: boolean }): SearchHit[] {
+  /** Finds every match to redact in the whole document: a preset (by id) or the caller's own text or pattern. */
+  findForRedaction(docId: number, query: RedactionQuery): SearchHit[] {
+    return this.findForRedactionBatch(docId, query, 0, Infinity).hits;
+  }
+
+  /**
+   * Finds matches to redact from page `from` on, for about `budgetMs` (then call again from `next`, which is the page
+   * count when done). There is no limit on matches: every one must be found, or text would be left in the file.
+   * Pages are scanned in their plain text (quick); positions are worked out only on pages that have matches.
+   */
+  findForRedactionBatch(docId: number, query: RedactionQuery, from: number, budgetMs = 60): { hits: SearchHit[]; next: number } {
     const preset = query.preset ? PRESETS.find((p) => p.id === query.preset) : undefined;
     if (query.preset && !preset) throw new EngineError("Unknown pattern.", "bad-query");
-    const pattern = preset ? preset.pattern : query.text ?? "";
-    const hits = this.search(docId, pattern, { caseSensitive: preset ? true : !!query.caseSensitive, wholeWord: false, regex: preset ? true : !!query.regex }, 0, Infinity);
-    return preset?.validate ? hits.filter((h) => preset.validate!(h.match ?? "")) : hits;
+    const opts = { caseSensitive: preset ? true : !!query.caseSensitive, wholeWord: false, regex: preset ? true : !!query.regex };
+    const pattern = buildPattern(preset ? preset.pattern : query.text ?? "", opts);
+    if (!pattern) throw new EngineError("That search pattern isn't valid.", "bad-query");
+    const count = this.get(docId).doc.countPages();
+    const hits: SearchHit[] = [];
+    const started = Date.now();
+    let p = Math.max(0, from);
+    while (p < count) {
+      if (searchText(this.plainText(docId, p), p, pattern, 1, undefined, false).length) {
+        for (const h of searchLayer(this.textLayer(docId, p), p, pattern)) {
+          if (!preset?.validate || preset.validate(h.match ?? "")) hits.push(h);
+        }
+      }
+      p++;
+      if (Date.now() - started >= budgetMs) break;
+    }
+    return { hits, next: p };
   }
 
   markForRedaction(docId: number, items: { page: number; quads?: Quad[]; rect?: Rect }[], overlayText?: string): EditResult & { marked: number } {

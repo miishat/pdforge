@@ -124,7 +124,11 @@ close-window prompt (all are desktop-only paths; the browser test build download
 - ✅ Redaction: mark text (drag over it), mark areas, or find and redact (email, phone, US SSN, card numbers with Luhn
   check, IBAN, dates, IP addresses, or your own words/regex). Marks are reviewed first, then applied: text is removed,
   covered image pixels blanked (or whole images removed), covered drawings removed. The next save rewrites the whole
-  file, so nothing survives in an earlier revision
+  file, so nothing survives in an earlier revision. Find and redact has no limit on matches (until 0.2.4 it
+  silently stopped at 5,000) and searches in short batches with a progress bar, so PDForge stays responsive:
+  17,000-page file, email addresses: 26 s (was 65 s with the app frozen)
+- ✅ Reading text character by character frees MuPDF's per-character font objects at once; reading thousands of
+  pages in one go used to grow memory by about 0.3 MB a page until it ran out
 - ✅ Remove hidden information: properties/XMP metadata, scripts and launch actions, attachments, comments, private
   application data, embedded thumbnails (with a report of what was removed)
 - ✅ Edit bookmarks (add, rename, re-point, move, indent/outdent, delete), document title/author/subject/keywords,

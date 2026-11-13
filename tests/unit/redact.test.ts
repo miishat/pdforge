@@ -95,3 +95,24 @@ describe("sanitise", () => {
     expect(textOf(saved)).toContain("Customer record");
   });
 });
+
+describe("finding text to redact in large documents", () => {
+  it("finds every match, well past 5,000, in batches or all at once alike, each with its position", () => {
+    const engine = new PdfEngine();
+    const r = engine.open(new Uint8Array(readFileSync(new URL("../fixtures/long-600.pdf", import.meta.url))));
+    if (r.status !== "ok") throw new Error("expected ok");
+    const id = r.info.docId;
+    const query = { text: "[a-z]", regex: true };
+    const all = engine.findForRedaction(id, query);
+    expect(all.length).toBeGreaterThan(5000);
+    expect(all.every((h) => h.rects.length > 0)).toBe(true);
+    const batched = [];
+    for (let p = 0; p < 600; ) {
+      const b = engine.findForRedactionBatch(id, query, p, 0); // a zero budget: one page per call
+      expect(b.next).toBe(p + 1);
+      batched.push(...b.hits);
+      p = b.next;
+    }
+    expect(batched.map((h) => `${h.page}:${h.start}`)).toEqual(all.map((h) => `${h.page}:${h.start}`));
+  });
+});

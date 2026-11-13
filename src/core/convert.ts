@@ -86,6 +86,7 @@ function readRaw(doc: mupdf.Document, index: number, images: boolean): RawBlock[
         };
         fonts.set(name, style);
       }
+      font.destroy(); // only its name and style were needed
       line?.chars.push({ c, size, ...style });
     },
     endLine() {

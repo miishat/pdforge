@@ -56,7 +56,8 @@ function pieces(page: mupdf.Page): Piece[] {
     beginLine() {
       flush();
     },
-    onChar(c, _o, _f, size, quad) {
+    onChar(c, _o, font, size, quad) {
+      font.destroy(); // unused; free it now rather than when the garbage collector gets round to it
       const x0 = Math.min(quad[0], quad[4]);
       const x1 = Math.max(quad[2], quad[6]);
       const y0 = Math.min(quad[1], quad[3]);

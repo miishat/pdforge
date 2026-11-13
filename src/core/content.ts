@@ -49,6 +49,7 @@ export function readPage(page: mupdf.PDFPage): { lines: LineData[]; images: { in
       cur = { chars: [], quads: [], font: null, size: 0, color: [0, 0, 0], origin: null, dir: dir as Point, bbox: bbox as Rect };
     },
     onChar(c, origin, font, size, quad, color) {
+      if (!cur || cur.font) font.destroy(); // only each line's first font is kept
       if (!cur) return;
       if (!cur.font) {
         cur.font = font;

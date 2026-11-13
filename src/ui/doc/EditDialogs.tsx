@@ -1,5 +1,5 @@
 import { ImageAdd20Regular } from "@fluentui/react-icons";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { engine } from "../../core/client";
 import type { SearchHit } from "../../core/types";
 import { pickFile, type PickedFile } from "../../platform";
@@ -227,25 +227,51 @@ export function LinkDialogEdit({ count, onSave, onClose }: { count: number; onSa
   );
 }
 
-export function FindRedactDialog({ docId, onMark, onClose }: { docId: number; onMark: (hits: SearchHit[]) => void; onClose: () => void }) {
+export function FindRedactDialog({ docId, pageCount, onMark, onClose }: { docId: number; pageCount: number; onMark: (hits: SearchHit[]) => void; onClose: () => void }) {
   const [presets, setPresets] = useState<{ id: string; label: string }[]>([]);
   const [chosen, setChosen] = useState<Set<string>>(new Set(["email", "phone"]));
   const [text, setText] = useState("");
   const [regex, setRegex] = useState(false);
   const [hits, setHits] = useState<SearchHit[] | null>(null);
+  /** Pages searched so far (across all the patterns), while a search runs. */
+  const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const run = useRef(0);
+  useEffect(() => () => void run.current++, []);
   if (!presets.length) void engine().call("redactionPresets").then(setPresets);
+  /** Changing what to look for drops the results (and stops a search still running). */
+  const reset = () => {
+    run.current++;
+    setHits(null);
+    setProgress(null);
+  };
   const find = async () => {
+    const my = ++run.current;
     setError(null);
+    setHits(null);
+    const queries = [...[...chosen].map((preset) => ({ preset })), ...(text.trim() ? [{ text, regex }] : [])];
+    // Every match must be found, however many: a missed one would stay readable in the saved file.
+    // The search runs in short batches so the page keeps drawing and the progress shows.
+    const all: SearchHit[] = [];
     try {
-      const all: SearchHit[] = [];
-      for (const id of chosen) all.push(...(await engine().call("findForRedaction", docId, { preset: id })));
-      if (text.trim()) all.push(...(await engine().call("findForRedaction", docId, { text, regex })));
+      for (let q = 0; q < queries.length; q++) {
+        for (let p = 0; p < pageCount; ) {
+          const r = await engine().call("findForRedactionBatch", docId, queries[q], p, 60);
+          if (run.current !== my) return;
+          for (const h of r.hits) all.push(h);
+          p = r.next;
+          setProgress(q * pageCount + p);
+        }
+      }
       setHits(all);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (run.current === my) setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (run.current === my) setProgress(null);
     }
   };
+  const searching = progress !== null;
+  const total = Math.max(1, ([...chosen].length + (text.trim() ? 1 : 0)) * pageCount);
   return (
     <Dialog
       title="Find and redact"
@@ -254,8 +280,10 @@ export function FindRedactDialog({ docId, onMark, onClose }: { docId: number; on
       footer={
         <>
           <button className="button" onClick={onClose}>Cancel</button>
-          <button className="button" onClick={find}>Find</button>
-          <button className="button button--primary" disabled={!hits?.length} onClick={() => (onMark(hits!), onClose())}>Mark {hits?.length ?? ""} for redaction</button>
+          <button className="button" onClick={find} disabled={searching}>Find</button>
+          <button className="button button--primary" disabled={searching || !hits?.length} onClick={() => (onMark(hits!), onClose())}>
+            Mark {hits?.length ? hits.length.toLocaleString() : ""} for redaction
+          </button>
         </>
       }
     >
@@ -269,7 +297,7 @@ export function FindRedactDialog({ docId, onMark, onClose }: { docId: number; on
                 if (e.target.checked) n.add(p.id);
                 else n.delete(p.id);
                 setChosen(n);
-                setHits(null);
+                reset();
               }} />
               {p.label}
             </label>
@@ -278,14 +306,20 @@ export function FindRedactDialog({ docId, onMark, onClose }: { docId: number; on
       </fieldset>
       <label className="label">
         Words or phrases
-        <input className="field" value={text} onChange={(e) => (setText(e.target.value), setHits(null))} placeholder="e.g. Project Bluebird" />
+        <input className="field" value={text} onChange={(e) => (setText(e.target.value), reset())} placeholder="e.g. Project Bluebird" />
       </label>
-      <label className="check"><input type="checkbox" checked={regex} onChange={(e) => setRegex(e.target.checked)} /> Treat as a regular expression</label>
+      <label className="check"><input type="checkbox" checked={regex} onChange={(e) => (setRegex(e.target.checked), reset())} /> Treat as a regular expression</label>
+      {searching && (
+        <div className="redact-results" role="status">
+          <p>Searching… {Math.min(100, Math.floor((progress! / total) * 100))}%</p>
+          <progress className="update-progress" max={total} value={progress!} aria-label="Search progress" />
+        </div>
+      )}
       {hits && (
-        <div className="redact-results">
-          <p>{hits.length ? `${hits.length} match${hits.length === 1 ? "" : "es"} found.` : "Nothing found."}</p>
+        <div className="redact-results" role="status">
+          <p>{hits.length ? `${hits.length.toLocaleString()} match${hits.length === 1 ? "" : "es"} found in the whole document.` : "Nothing found."}</p>
           <ul>{hits.slice(0, 8).map((h, i) => <li key={i}>Page {h.page + 1}: <mark>{h.match}</mark></li>)}</ul>
-          {hits.length > 8 && <p className="muted">…and {hits.length - 8} more.</p>}
+          {hits.length > 8 && <p className="muted">…and {(hits.length - 8).toLocaleString()} more.</p>}
         </div>
       )}
       {error && <p className="panel__error">{error}</p>}

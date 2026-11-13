@@ -39,7 +39,7 @@ const DRAW_SAFE_OPS = new Set<string>([
   "info", "render", "renderImage", "textLayer", "pageText", "plainText", "textSource", "seedText", "textFingerprint",
   "allPlainText", "importPlainText", "firstUnread", "find", "search", "links", "outline", "attachments", "attachment",
   "layers", "annotations", "widgets", "formSummary", "signatures", "exportXfdf", "textLines", "images",
-  "redactionPresets", "findForRedaction", "redactionMarkCount", "markKinds", "changeStamp", "editState", "fileSize",
+  "redactionPresets", "findForRedaction", "findForRedactionBatch", "redactionMarkCount", "markKinds", "changeStamp", "editState", "fileSize",
   "properties", "compareText", "compareVisual", "findTables", "tablesToXlsx", "checkAccessibility", "exportText",
   "exportMarkdown", "exportHtml", "exportDocx", "exportImages", "checkPdfA", "ocrCandidates", "drawingSource", "hitSnippets",
 ]);

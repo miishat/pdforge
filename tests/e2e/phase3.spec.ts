@@ -161,6 +161,24 @@ test.describe("edit", () => {
     expect(await findPage(page, "DRAFT COPY")).toBeNull();
   });
 
+  test("find and redact finds every match in a long document, not just the first 5,000", async ({ page }) => {
+    await open(page, "long-600.pdf");
+    await mode(page, "Edit");
+    await page.getByRole("button", { name: "Redact", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Find and redact…" }).click();
+    const dialog = page.getByRole("dialog", { name: "Find and redact" });
+    await dialog.getByRole("checkbox", { name: "Email addresses" }).uncheck();
+    await dialog.getByRole("checkbox", { name: "Phone numbers" }).uncheck();
+    await dialog.getByPlaceholder("e.g. Project Bluebird").fill("[a-z]");
+    await dialog.getByRole("checkbox", { name: "Treat as a regular expression" }).check();
+    await dialog.getByRole("button", { name: "Find", exact: true }).click();
+    const found = dialog.getByText(/^[\d,]+ matches found in the whole document\.$/);
+    await expect(found).toBeVisible({ timeout: 30_000 });
+    const n = Number((await found.textContent())!.replace(/[^\d]/g, ""));
+    expect(n).toBeGreaterThan(5000);
+    await expect(dialog.getByRole("button", { name: `Mark ${n.toLocaleString("en-US")} for redaction` })).toBeEnabled();
+  });
+
   test("find and redact removes data from the saved file", async ({ page }) => {
     await open(page, "redact.pdf");
     await mode(page, "Edit");
@@ -170,7 +188,7 @@ test.describe("edit", () => {
     await dialog.getByRole("checkbox", { name: "Phone numbers" }).uncheck();
     await dialog.getByPlaceholder("e.g. Project Bluebird").fill("BLUEBIRD");
     await dialog.getByRole("button", { name: "Find", exact: true }).click();
-    await expect(dialog.getByText("3 matches found.")).toBeVisible();
+    await expect(dialog.getByText("3 matches found in the whole document.")).toBeVisible();
     await dialog.getByRole("button", { name: "Mark 3 for redaction" }).click();
     await expect(page.locator(".infobar--bad")).toContainText("3 areas are marked");
     await page.locator(".infobar--bad").getByRole("button", { name: "Apply redactions…" }).click();

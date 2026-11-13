@@ -1643,6 +1643,7 @@ export function DocumentView(props: DocumentViewProps) {
       {dialog?.kind === "findRedact" && (
         <FindRedactDialog
           docId={info.docId}
+          pageCount={info.pageCount}
           onClose={() => setDialog(null)}
           onMark={async (hits) => {
             const items = hits.map((h) => ({ page: h.page, quads: h.rects.map(([x0, y0, x1, y1]) => [x0, y0, x1, y0, x0, y1, x1, y1] as [number, number, number, number, number, number, number, number]) }));
