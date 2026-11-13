@@ -58,7 +58,7 @@ What doesn't fit a Mac yet falls into six areas below.
 
 ## 4. Safari's engine instead of Chromium (about a day, the uncertain part)
 
-On Windows the app runs in WebView2 (Chromium); all 79 end-to-end tests run in Chromium. On a Mac it runs in
+On Windows the app runs in WebView2 (Chromium); all 81 end-to-end tests run in Chromium. On a Mac it runs in
 WKWebView, the engine behind Safari. Things to check and fix:
 
 - **Printing.** `window.print()` (`src/ui/doc/print.ts`) has been unreliable in WKWebView. Use Tauri's own print
@@ -74,6 +74,11 @@ WKWebView, the engine behind Safari. Things to check and fix:
   draggable, since dragging the scrollbar is a main way to move through long files.
 - **Retina screens.** Pages are drawn at twice the pixels per side (four times the memory), so the 128 MB page cache
   holds fewer pages. Check how it feels; raise the budgets on Mac if needed.
+- **Drawing helpers** (added in 0.2.4). Up to two extra engine workers draw pages alongside the main one, each with
+  its own copy of the file (files up to 300 MB). They're module workers, which Safari supports from version 15, so
+  macOS 12 is fine. How many start depends on `navigator.hardwareConcurrency`; check WebKit reports the real core
+  count, or the Mac gets fewer helpers than it could use. With Retina's larger page images, check memory with a
+  large file zoomed out to many pages.
 - **Fonts.** The interface asks for Segoe UI and falls back to the system font (San Francisco). Check spacing and
   sizes in both light and dark themes.
 
@@ -110,7 +115,8 @@ After a CI build, install it and check, in about 15 minutes:
 4. ⌘O, ⌘S, ⌘K, ⌘F, ⌘C/⌘V in a text field, ⌘W; menus work and show the right shortcuts.
 5. Edit something, then ⌘Q: the "unsaved changes" prompt appears.
 6. Print a mixed portrait/landscape file.
-7. Read aloud, search a large file twice (the second search is quick), sign, fill a form, OCR a scan.
+7. Read aloud, search a large file twice (the second search is quick; a common word goes past 5,000 results and
+   the list scrolls smoothly), find-and-redact, sign, fill a form, OCR a scan.
 8. Light and dark mode.
 9. Check for updates from the start screen.
 
