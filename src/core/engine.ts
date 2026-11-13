@@ -456,7 +456,8 @@ export class PdfEngine {
   }
 
   /**
-   * Fast search for the find bar: scans pages from `from`, stopping at `to`, after `budgetMs`, or at `limit` hits.
+   * Fast search for the find bar: scans pages from `from`, stopping at `to`, after `budgetMs`, or once it has `limit`
+   * hits (finishing the page it's on).
    * Hits carry character offsets but no rectangles; work those out from the page's text layer when it's shown.
    */
   find(
@@ -472,7 +473,8 @@ export class PdfEngine {
     const started = Date.now();
     let p = Math.max(0, from);
     while (p < end && hits.length < limit) {
-      for (const h of searchText(this.plainText(docId, p), p, pattern, limit - hits.length, undefined, snippets)) hits.push(h);
+      // Whole pages only: `next` must not skip hits left on a page, so a batch may end a little over `limit`.
+      for (const h of searchText(this.plainText(docId, p), p, pattern, Infinity, undefined, snippets)) hits.push(h);
       p++;
       if (Date.now() - started >= budgetMs) break;
     }

@@ -53,3 +53,22 @@ describe("hits without snippets", () => {
     snippets.forEach((s, i) => expect(s).toEqual({ before: withText[i].before, match: withText[i].match, after: withText[i].after }));
   });
 });
+
+describe("search batches", () => {
+  it("never drops hits on the page where a batch fills up", () => {
+    const engine = new PdfEngine();
+    const r = engine.open(fixture("long-300.pdf"));
+    if (r.status !== "ok") throw new Error("expected ok");
+    const opts = { caseSensitive: false, wholeWord: false, regex: true };
+    const whole = engine.find(r.info.docId, "[a-z]", opts, 0, 300, Infinity, 1e6, true, false).hits;
+    // Tiny batches, each ending mid-page: together they must find exactly the same hits.
+    const batched = [];
+    for (let p = 0; p < 300; ) {
+      const { hits, next } = engine.find(r.info.docId, "[a-z]", opts, p, 300, 7, 1e6, true, false);
+      batched.push(...hits);
+      expect(next).toBeGreaterThan(p);
+      p = next;
+    }
+    expect(batched.map((h) => `${h.page}:${h.start}`)).toEqual(whole.map((h) => `${h.page}:${h.start}`));
+  });
+});
