@@ -5,10 +5,10 @@ import { loadSavedText, saveText } from "./savedText";
 import type { SearchHit, SearchOptions } from "../../core/types";
 
 /**
- * The most hits one search collects. Hits are small (page and character offsets; their snippets are fetched only
- * for the rows on screen), so even a million take about 50 MB.
+ * The most hits one search collects; past that the count shows "+". Hits are small (page and character offsets;
+ * their snippets are fetched only for the rows on screen), so even this many take a few MB.
  */
-export const MAX_HITS = 1_000_000;
+export const MAX_HITS = 50_000;
 /** Hits in the first batch of a search (shown at once), and in each later one. */
 const FIRST_BATCH_HITS = 500;
 const BATCH_HITS = 20_000;

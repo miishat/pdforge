@@ -1,4 +1,4 @@
-// The search results list. A search can find up to a million hits, so only the rows near the visible part of the
+// The search results list. A search can find up to 50,000 hits, so only the rows near the visible part of the
 // list exist, and the text shown around each hit is fetched from the engine for those rows only.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { engine } from "../../core/client";
