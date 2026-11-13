@@ -72,3 +72,18 @@ describe("search batches", () => {
     expect(batched.map((h) => `${h.page}:${h.start}`)).toEqual(whole.map((h) => `${h.page}:${h.start}`));
   });
 });
+
+describe("snippets for stale hits", () => {
+  it("gives null for hits on pages deleted since the search, without failing the others", () => {
+    const engine = new PdfEngine();
+    const r = engine.open(fixture("long-300.pdf"));
+    if (r.status !== "ok") throw new Error("expected ok");
+    const id = r.info.docId;
+    const { hits } = engine.find(id, "Long", { caseSensitive: false, wholeWord: false, regex: false }, 297, 300, 100, 1e6, true, false);
+    expect(hits.map((h) => h.page)).toEqual([297, 298, 299]);
+    engine.deletePages(id, [298, 299]);
+    const s = engine.hitSnippets(id, hits);
+    expect(s[0]?.match).toBe("Long");
+    expect(s.slice(1)).toEqual([null, null]);
+  });
+});

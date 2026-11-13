@@ -481,9 +481,13 @@ export class PdfEngine {
     return { hits, next: p };
   }
 
-  /** The text around each hit (found by `find` without snippets), for the rows of the results list on screen. */
-  hitSnippets(docId: number, hits: { page: number; start: number; end: number }[]): HitSnippet[] {
-    return hits.map((h) => hitSnippet(this.plainText(docId, h.page), h.start, h.end));
+  /**
+   * The text around each hit (found by `find` without snippets), for the rows of the results list on screen.
+   * A hit on a page that no longer exists (pages deleted since the search) gets null rather than failing the rest.
+   */
+  hitSnippets(docId: number, hits: { page: number; start: number; end: number }[]): (HitSnippet | null)[] {
+    const count = this.get(docId).doc.countPages();
+    return hits.map((h) => (h.page >= 0 && h.page < count ? hitSnippet(this.plainText(docId, h.page), h.start, h.end) : null));
   }
 
   /** Searches pages [from, to). Call repeatedly in batches so the UI can show progress and cancel. */

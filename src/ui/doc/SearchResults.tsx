@@ -48,7 +48,7 @@ export function SearchResults({ docId, search, onSelect, labels }: { docId: numb
   const [range, setRange] = useState<[number, number]>([0, 0]);
 
   // Snippets fetched so far, for this query only.
-  const snippets = useRef(new Map<string, HitSnippet>());
+  const snippets = useRef(new Map<string, HitSnippet | null>());
   const asked = useRef(new Set<string>());
   const [, setFetched] = useState(0);
   useEffect(() => {
@@ -126,7 +126,8 @@ export function SearchResults({ docId, search, onSelect, labels }: { docId: numb
       );
     const s = h.match !== undefined ? (h as HitSnippet) : snippets.current.get(keyOf(h));
     rows.push(
-      <li key={i} className="results__row" style={{ top }}>
+      // Only some rows exist at a time, so tell screen readers where each sits in the whole list.
+      <li key={i} className="results__row" style={{ top }} aria-setsize={hits.length} aria-posinset={i + 1}>
         <button className="results__item" aria-current={i === search.current} aria-label={s ? undefined : `Result ${i + 1}, page ${labels?.[h.page] ?? h.page + 1}`} onClick={() => onSelect(i)}>
           <span className="results__text">
             {s ? (
@@ -135,6 +136,9 @@ export function SearchResults({ docId, search, onSelect, labels }: { docId: numb
                 <mark>{s.match}</mark>
                 {s.after}
               </>
+            ) : s === null ? (
+              // Fetched, but the page is gone (deleted since the search).
+              "This page no longer exists."
             ) : (
               "\u00a0"
             )}
