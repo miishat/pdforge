@@ -44,7 +44,7 @@ export function SearchBar({ state, pageCount, focusToken, initialQuery, onRun, o
   let status = "";
   if (state.error) status = state.error;
   else if (state.query && state.status !== "idle") {
-    if (state.hits.length) status = `${(state.current ?? 0) + 1} of ${state.hits.length}${state.truncated ? "+" : ""}`;
+    if (state.hits.length) status = `${((state.current ?? 0) + 1).toLocaleString()} of ${state.hits.length.toLocaleString()}${state.truncated ? "+" : ""}`;
     else if (state.status === "searching") status = "Searching…";
     else status = "No results";
     if (state.status === "searching" && pageCount > 50) status += ` · page ${state.searched} of ${pageCount}`;

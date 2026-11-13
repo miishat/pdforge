@@ -804,20 +804,31 @@ kbd {
 .tree__label:disabled {
   color: var(--text-faint);
 }
-/* Long result lists: the browser skips laying out and painting rows that are off screen. */
-.results > li {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 44px;
+/* Only the rows near view exist (SearchResults.tsx); each is placed at a fixed height so a million fit. */
+.results--virtual {
+  position: relative;
 }
+.results--virtual > li {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+/* Heights: keep in step with RESULT_HEADER_H and RESULT_ITEM_H in SearchResults.tsx. */
 .results__page {
+  box-sizing: border-box;
+  height: 32px;
   padding: var(--space-3) var(--space-2) var(--space-1);
   font-size: var(--text-xs);
+  line-height: 16px;
   font-weight: var(--weight-semibold);
   color: var(--text-muted);
 }
 .results__item {
   display: block;
+  box-sizing: border-box;
   width: 100%;
+  height: 44px;
+  overflow: hidden;
   padding: var(--space-1) var(--space-2);
   border: 0;
   border-radius: var(--radius-sm);
@@ -826,6 +837,13 @@ kbd {
   line-height: 1.35;
   text-align: left;
   color: var(--text-muted);
+}
+/* At most two lines of text around the hit. */
+.results__text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 .results__item mark {
   background: rgba(255, 196, 0, 0.45);

@@ -64,3 +64,28 @@ test("a large PDF's text is saved after its first search and used next time; it 
   await expect(page.getByRole("status").filter({ hasText: "Saved search data cleared" })).toBeVisible();
   expect(await savedEntries(page)).toHaveLength(0);
 });
+
+test("a search can find far more than 5,000 results, and the list stays light", async ({ page }) => {
+  await page.goto("/");
+  await open(page, "long-600.pdf");
+  await page.keyboard.press("Control+f");
+  await view(page).getByRole("button", { name: "Regular expression" }).click();
+  await view(page).getByLabel("Find in document").fill("[a-z]");
+  // About 20,000 letters across 600 pages: all counted (no "+"), with thousands separators.
+  await expect(view(page).locator(".searchbar__status")).toHaveText(/^1 of \d{2},\d{3}$/, { timeout: 30_000 });
+  const total = Number((await view(page).locator(".searchbar__status").textContent())!.replace(/^1 of |,/g, ""));
+  expect(total).toBeGreaterThan(5000);
+
+  await page.keyboard.press("F4");
+  const items = view(page).locator(".results__item");
+  // Only the rows near view exist, and they show the text around each hit.
+  await expect(items.first()).toContainText("Page");
+  expect(await items.count()).toBeLessThan(200);
+  // Jumping to the last result scrolls the list there and fills in its text.
+  await view(page).getByLabel("Find in document").press("Shift+Enter");
+  await expect(view(page).locator(".searchbar__status")).toHaveText(`${total.toLocaleString("en-US")} of ${total.toLocaleString("en-US")}`);
+  const current = view(page).locator('.results__item[aria-current="true"]');
+  await expect(current).toBeVisible();
+  await expect(current.locator("mark")).toHaveText(/^[a-z]$/i);
+  await expect(view(page).getByLabel("Page number")).toHaveValue("600");
+});

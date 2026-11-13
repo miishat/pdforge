@@ -18,7 +18,7 @@ import {
 } from "./content";
 import { pageWidgets, resetForm, setFieldValue, summarize, type FormSummary, type WidgetInfo } from "./forms";
 import { openIdentity, signDocument, verifySignatures, type Identity, type SignatureInfo, type SignOptions } from "./signing";
-import { buildPattern, searchLayer, searchText } from "./textlayer";
+import { buildPattern, hitSnippet, searchLayer, searchText } from "./textlayer";
 import { plainPageText } from "./plaintext";
 import { sha256Hex, unpackPlainText } from "./plainStore";
 import {
@@ -53,6 +53,7 @@ import type {
   Rect,
   RenderedPage,
   RenderRequest,
+  HitSnippet,
   SearchHit,
   SearchOptions,
   TextLayer,
@@ -458,7 +459,10 @@ export class PdfEngine {
    * Fast search for the find bar: scans pages from `from`, stopping at `to`, after `budgetMs`, or at `limit` hits.
    * Hits carry character offsets but no rectangles; work those out from the page's text layer when it's shown.
    */
-  find(docId: number, query: string, opts: SearchOptions, from: number, to: number, limit = 5000, budgetMs = 60, readMissing = true): { hits: SearchHit[]; next: number } {
+  find(
+    docId: number, query: string, opts: SearchOptions, from: number, to: number, limit = 5000, budgetMs = 60, readMissing = true,
+    snippets = true,
+  ): { hits: SearchHit[]; next: number } {
     const { doc } = this.get(docId);
     const pattern = buildPattern(query, opts);
     if (!pattern) throw new EngineError("That search pattern isn't valid.", "bad-query");
@@ -468,11 +472,16 @@ export class PdfEngine {
     const started = Date.now();
     let p = Math.max(0, from);
     while (p < end && hits.length < limit) {
-      hits.push(...searchText(this.plainText(docId, p), p, pattern, limit - hits.length));
+      for (const h of searchText(this.plainText(docId, p), p, pattern, limit - hits.length, undefined, snippets)) hits.push(h);
       p++;
       if (Date.now() - started >= budgetMs) break;
     }
     return { hits, next: p };
+  }
+
+  /** The text around each hit (found by `find` without snippets), for the rows of the results list on screen. */
+  hitSnippets(docId: number, hits: { page: number; start: number; end: number }[]): HitSnippet[] {
+    return hits.map((h) => hitSnippet(this.plainText(docId, h.page), h.start, h.end));
   }
 
   /** Searches pages [from, to). Call repeatedly in batches so the UI can show progress and cancel. */
@@ -885,7 +894,7 @@ export class PdfEngine {
     if (query.preset && !preset) throw new EngineError("Unknown pattern.", "bad-query");
     const pattern = preset ? preset.pattern : query.text ?? "";
     const hits = this.search(docId, pattern, { caseSensitive: preset ? true : !!query.caseSensitive, wholeWord: false, regex: preset ? true : !!query.regex }, 0, Infinity);
-    return preset?.validate ? hits.filter((h) => preset.validate!(h.match)) : hits;
+    return preset?.validate ? hits.filter((h) => preset.validate!(h.match ?? "")) : hits;
   }
 
   markForRedaction(docId: number, items: { page: number; quads?: Quad[]; rect?: Rect }[], overlayText?: string): EditResult & { marked: number } {

@@ -48,6 +48,9 @@ Legend: ✅ done and tested · 🟡 partial · ⬜ not started
   (Ctrl+Shift+B): words in any order, case and accents ignored, each result shows the part it sits under. Thumbnails
   exist only near the visible part of the list, so 17,000 pages cost about as much as 20
 - ✅ Full-text search (Ctrl+F, F3): match case, whole words, regex, live count, highlights, results list; runs in batches.
+  Up to 1,000,000 results per search (the count shows "+" past that). Hits hold only their page and position; the
+  results list draws just the rows on screen and fetches the text around those hits, so a million results take
+  about 50–100 MB. 17,000-page file: "the" finds 607,166 results
   Starts at the current page and wraps around. Page text is read once and kept, so later searches are near-instant;
   positions are worked out only for pages on screen. On large unchanged files, helper workers read pages in parallel
   (17,000 dense pages: about 3 minutes before, about 13 s first search on 4 cores, under 0.1 s after).

@@ -41,7 +41,7 @@ const DRAW_SAFE_OPS = new Set<string>([
   "layers", "annotations", "widgets", "formSummary", "signatures", "exportXfdf", "textLines", "images",
   "redactionPresets", "findForRedaction", "redactionMarkCount", "markKinds", "changeStamp", "editState", "fileSize",
   "properties", "compareText", "compareVisual", "findTables", "tablesToXlsx", "checkAccessibility", "exportText",
-  "exportMarkdown", "exportHtml", "exportDocx", "exportImages", "checkPdfA", "ocrCandidates", "drawingSource",
+  "exportMarkdown", "exportHtml", "exportDocx", "exportImages", "checkPdfA", "ocrCandidates", "drawingSource", "hitSnippets",
 ]);
 
 /** How many drawing helpers to start: two, unless the computer has too few cores to run them alongside the rest. */

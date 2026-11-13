@@ -73,7 +73,14 @@ export interface SearchHit {
   end: number;
   /** One rectangle per line the hit spans, page space. */
   rects: Rect[];
-  /** Short text around the hit, for the results list. */
+  /** Short text around the hit, for the results list. Left out by the find bar's search (see `hitSnippets`). */
+  before?: string;
+  match?: string;
+  after?: string;
+}
+
+/** The text shown for a hit in the results list. */
+export interface HitSnippet {
   before: string;
   match: string;
   after: string;

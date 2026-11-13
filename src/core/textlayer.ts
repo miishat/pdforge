@@ -1,6 +1,6 @@
 // Pure helpers over a page TextLayer: geometry for selection and highlights, hit testing, search.
 // DOM-free and MuPDF-free so they run anywhere and are easy to unit test.
-import type { Rect, SearchHit, SearchOptions, TextLayer } from "./types";
+import type { HitSnippet, Rect, SearchHit, SearchOptions, TextLayer } from "./types";
 
 /** Bounding box of character i. */
 export function charRect(layer: TextLayer, i: number): Rect {
@@ -136,7 +136,14 @@ export function searchLayer(layer: TextLayer, page: number, pattern: RegExp, lim
 }
 
 /** Finds all matches in a page's text. Without the text layer, hits have no rectangles yet (see `hitRects`). */
-export function searchText(text: string, page: number, pattern: RegExp, limit = Infinity, layer?: TextLayer): SearchHit[] {
+/** Shared by hits that have no rectangles yet (one array, not one per hit: there can be a million hits). */
+const NO_RECTS: Rect[] = [];
+
+/**
+ * Hits for `pattern` in a page's text. `snippets` off leaves out the text around each hit, which takes most of a
+ * hit's memory; get it later with `hitSnippet` for the hits on screen.
+ */
+export function searchText(text: string, page: number, pattern: RegExp, limit = Infinity, layer?: TextLayer, snippets = true): SearchHit[] {
   const hits: SearchHit[] = [];
   pattern.lastIndex = 0;
   let m: RegExpExecArray | null;
@@ -147,15 +154,8 @@ export function searchText(text: string, page: number, pattern: RegExp, limit = 
     }
     const start = m.index;
     const end = start + m[0].length;
-    hits.push({
-      page,
-      start,
-      end,
-      rects: layer ? rectsForRange(layer, start, end) : [],
-      before: snippet(text.slice(Math.max(0, start - 40), start), "start"),
-      match: m[0].replace(/\s+/g, " "),
-      after: snippet(text.slice(end, end + 60), "end"),
-    });
+    const rects = layer ? rectsForRange(layer, start, end) : NO_RECTS;
+    hits.push(snippets ? { page, start, end, rects, ...hitSnippet(text, start, end) } : { page, start, end, rects });
   }
   return hits;
 }
@@ -163,6 +163,15 @@ export function searchText(text: string, page: number, pattern: RegExp, limit = 
 /** Rectangles for a hit found by `searchText`, once the page's text layer is at hand. */
 export function hitRects(hit: SearchHit, layer: TextLayer): Rect[] {
   return hit.rects.length ? hit.rects : rectsForRange(layer, hit.start, hit.end);
+}
+
+/** The text around a hit, for the results list: `text` is the page's text the hit's offsets point into. */
+export function hitSnippet(text: string, start: number, end: number): HitSnippet {
+  return {
+    before: snippet(text.slice(Math.max(0, start - 40), start), "start"),
+    match: text.slice(start, end).replace(/\s+/g, " "),
+    after: snippet(text.slice(end, end + 60), "end"),
+  };
 }
 
 function snippet(s: string, side: "start" | "end"): string {

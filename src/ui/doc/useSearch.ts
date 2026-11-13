@@ -4,7 +4,11 @@ import { ensureTextIndex, stopTextIndex } from "./textIndex";
 import { loadSavedText, saveText } from "./savedText";
 import type { SearchHit, SearchOptions } from "../../core/types";
 
-const MAX_HITS = 5000;
+/**
+ * The most hits one search collects. Hits are small (page and character offsets; their snippets are fetched only
+ * for the rows on screen), so even a million take about 50 MB.
+ */
+export const MAX_HITS = 1_000_000;
 
 export interface SearchState {
   query: string;
@@ -69,7 +73,7 @@ export function useSearch(docId: number, pageCount: number, startPage: () => num
             let r: { hits: SearchHit[]; next: number };
             try {
               const helping = !!index?.active;
-              r = await engine().call("find", docId, query, opts, p, segTo, MAX_HITS - head.length - tail.length, 60, !helping);
+              r = await engine().call("find", docId, query, opts, p, segTo, MAX_HITS - head.length - tail.length, 60, !helping, false);
               if (helping && r.next === p) {
                 // The helpers haven't read this page yet.
                 await index!.changed();
@@ -83,7 +87,8 @@ export function useSearch(docId: number, pageCount: number, startPage: () => num
             const added = r.hits;
             searched += r.next - p;
             p = r.next;
-            into.push(...added);
+            // One at a time: spreading a batch of several hundred thousand hits would overflow the call stack.
+            for (const h of added) into.push(h);
             const truncated = head.length + tail.length >= MAX_HITS;
             const done = truncated || (into === head && p >= segTo) || (into === tail && p >= segTo && from === 0);
             const now = performance.now();

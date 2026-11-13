@@ -20,6 +20,7 @@ import type { OutlineEdit } from "../../core/content";
 import { BookmarkEditor } from "./BookmarkEditor";
 import { useDocData, type DocData } from "./docData";
 import type { SearchState } from "./useSearch";
+import { SearchResults } from "./SearchResults";
 
 export type Panel = "thumbnails" | "outline" | "search" | "comments" | "attachments" | "layers" | "signatures";
 
@@ -132,7 +133,7 @@ export function Sidebar(props: Props) {
               focusFind={props.focusBookmarkFind}
             />
           )}
-          {shown === "search" && <SearchResults search={props.search} onSelect={props.onSelectHit} labels={props.info.labels} />}
+          {shown === "search" && <SearchResults docId={props.info.docId} search={props.search} onSelect={props.onSelectHit} labels={props.info.labels} />}
           {shown === "comments" && props.comments}
           {shown === "signatures" && props.signatures}
           {shown === "attachments" && <Attachments items={props.attachments} onSave={props.onSaveAttachment} onAdd={props.onAddAttachment} onDelete={props.onDeleteAttachment} />}
@@ -337,33 +338,6 @@ function OutlineItem({ node, onGo, depth }: { node: OutlineNode; onGo: (d: Dest)
       </div>
       {hasKids && open && <OutlineTree nodes={node.children} onGo={onGo} depth={depth + 1} />}
     </li>
-  );
-}
-
-function SearchResults({ search, onSelect, labels }: { search: SearchState; onSelect: (i: number) => void; labels: string[] | null }) {
-  const listRef = useRef<HTMLOListElement>(null);
-  useEffect(() => {
-    listRef.current?.querySelector<HTMLElement>('[aria-current="true"]')?.scrollIntoView({ block: "nearest" });
-  }, [search.current]);
-  if (!search.hits.length) return <p className="sidebar__empty">{search.status === "searching" ? "Searching…" : "No results."}</p>;
-  let lastPage = -1;
-  return (
-    <ol ref={listRef} className="results">
-      {search.hits.map((h, i) => {
-        const header = h.page !== lastPage;
-        lastPage = h.page;
-        return (
-          <li key={i}>
-            {header && <div className="results__page">Page {labels?.[h.page] ?? h.page + 1}</div>}
-            <button className="results__item" aria-current={i === search.current} onClick={() => onSelect(i)}>
-              {h.before}
-              <mark>{h.match}</mark>
-              {h.after}
-            </button>
-          </li>
-        );
-      })}
-    </ol>
   );
 }
 
