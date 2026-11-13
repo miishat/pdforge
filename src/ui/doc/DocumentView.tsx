@@ -1,3 +1,4 @@
+import { shortcutLabel } from "../commands";
 import { Pause20Regular, Play20Regular, Stop20Regular } from "@fluentui/react-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { engine } from "../../core/client";
@@ -910,7 +911,7 @@ export function DocumentView(props: DocumentViewProps) {
       const hasSel = !!selection && !isEmpty(selection);
       const entries: MenuEntry[] = [];
       if (hasSel) {
-        entries.push({ label: "Copy", shortcut: "Ctrl+C", onSelect: copySelection, disabled: !info.permissions.copy, reason: "The author doesn't allow copying." });
+        entries.push({ label: "Copy", shortcut: shortcutLabel("edit.copy"), onSelect: copySelection, disabled: !info.permissions.copy, reason: "The author doesn't allow copying." });
         entries.push({ label: "Highlight", onSelect: () => void applyMarkup("highlight", selection!) });
         entries.push({ label: "Underline", onSelect: () => void applyMarkup("underline", selection!) });
         entries.push({ label: "Strike through", onSelect: () => void applyMarkup("strikeout", selection!) });
@@ -921,7 +922,7 @@ export function DocumentView(props: DocumentViewProps) {
         entries.push({ kind: "separator" });
       }
       entries.push(
-        { label: "Select all", shortcut: "Ctrl+A", onSelect: selectAll },
+        { label: "Select all", shortcut: shortcutLabel("edit.selectAll"), onSelect: selectAll },
         { kind: "separator" },
         { label: "Select text", shortcut: "V", checked: tool === "select", onSelect: () => setTool("select") },
         { label: "Hand", shortcut: "H", checked: tool === "hand", onSelect: () => setTool("hand") },
@@ -931,8 +932,8 @@ export function DocumentView(props: DocumentViewProps) {
         { label: "Rotate clockwise", onSelect: () => doRotate(90) },
         { label: "Rotate counterclockwise", onSelect: () => doRotate(-90) },
         { kind: "separator" },
-        { label: "Print…", shortcut: "Ctrl+P", onSelect: () => setDialog({ kind: "print" }) },
-        { label: "Document properties", shortcut: "Ctrl+D", onSelect: () => setDialog({ kind: "properties" }) },
+        { label: "Print…", shortcut: shortcutLabel("file.print"), onSelect: () => setDialog({ kind: "print" }) },
+        { label: "Document properties", shortcut: shortcutLabel("file.properties"), onSelect: () => setDialog({ kind: "properties" }) },
       );
       setMenu({ x: e.clientX, y: e.clientY, entries });
     },

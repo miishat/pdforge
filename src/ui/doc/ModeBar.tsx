@@ -1,3 +1,4 @@
+import { shortcutLabel } from "../commands";
 import {
   ArrowRedo20Regular, ArrowUndo20Regular, ArrowUpRight20Regular, CalendarLtr20Regular, Certificate20Regular,
   Checkmark20Regular, ChevronDown16Regular, Circle12Filled, CommentNote20Regular, Cursor20Regular, Dismiss20Regular,
@@ -478,10 +479,10 @@ function StyleControls(p: Common) {
 export function UndoRedo(p: Pick<Common, "canUndo" | "canRedo" | "undoLabel" | "redoLabel" | "onUndo" | "onRedo">) {
   return (
     <div className="modebar__group">
-      <button className="icon-button" aria-label="Undo" title={p.undoLabel ? `Undo ${p.undoLabel.toLowerCase()} (Ctrl+Z)` : "Undo (Ctrl+Z)"} disabled={!p.canUndo} onClick={p.onUndo}>
+      <button className="icon-button" aria-label="Undo" title={p.undoLabel ? `Undo ${p.undoLabel.toLowerCase()} (${shortcutLabel("edit.undo")})` : `Undo (${shortcutLabel("edit.undo")})`} disabled={!p.canUndo} onClick={p.onUndo}>
         <ArrowUndo20Regular />
       </button>
-      <button className="icon-button" aria-label="Redo" title={p.redoLabel ? `Redo ${p.redoLabel.toLowerCase()} (Ctrl+Y)` : "Redo (Ctrl+Y)"} disabled={!p.canRedo} onClick={p.onRedo}>
+      <button className="icon-button" aria-label="Redo" title={p.redoLabel ? `Redo ${p.redoLabel.toLowerCase()} (${shortcutLabel("edit.redo")})` : `Redo (${shortcutLabel("edit.redo")})`} disabled={!p.canRedo} onClick={p.onRedo}>
         <ArrowRedo20Regular />
       </button>
     </div>
@@ -494,12 +495,12 @@ export function Divider() {
 
 export function ModeSwitch({ mode, onMode }: { mode: Mode; onMode: (m: Mode) => void }) {
   const modes: [Mode, string, string][] = [
-    ["read", "Read", "Ctrl+Shift+1"],
-    ["comment", "Comment", "Ctrl+Shift+2"],
-    ["fill", "Fill & Sign", "Ctrl+Shift+3"],
-    ["organize", "Organize", "Ctrl+Shift+4"],
-    ["edit", "Edit", "Ctrl+Shift+5"],
-    ["protect", "Protect", "Ctrl+Shift+6"],
+    ["read", "Read", shortcutLabel("mode.read")],
+    ["comment", "Comment", shortcutLabel("mode.comment")],
+    ["fill", "Fill & Sign", shortcutLabel("mode.fill")],
+    ["organize", "Organize", shortcutLabel("mode.organize")],
+    ["edit", "Edit", shortcutLabel("mode.edit")],
+    ["protect", "Protect", shortcutLabel("mode.protect")],
   ];
   return (
     <div className="mode-switch" role="tablist" aria-label="Mode">

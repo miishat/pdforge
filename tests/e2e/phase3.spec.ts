@@ -1,3 +1,4 @@
+import { downloadName } from "./helpers";
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -88,7 +89,7 @@ test.describe("organize", () => {
     await page.getByRole("tab", { name: /^sample\.pdf/ }).click();
     await page.getByRole("button", { name: "Split" }).click();
     const downloads: string[] = [];
-    page.on("download", (d) => downloads.push(d.suggestedFilename()));
+    page.on("download", (d) => downloads.push(downloadName(d)));
     const dialog = page.getByRole("dialog", { name: "Split document" });
     await dialog.getByLabel("Pages per file").fill("2");
     await dialog.getByRole("button", { name: "Split into 3 files" }).click();

@@ -1,6 +1,7 @@
 import { Add16Regular, Dismiss16Regular, Square16Regular, Subtract16Regular, LockClosed12Regular } from "@fluentui/react-icons";
 import { useEffect, useRef } from "react";
 import { isDesktop, showSnapLayouts, windowAction } from "../platform";
+import { shortcutLabel } from "./commands";
 import { Mark } from "./Mark";
 import type { Tab } from "./useTabs";
 
@@ -48,7 +49,7 @@ export function TitleBar({ tabs, activeId, onActivate, onClose, onNew }: Props) 
             <button
               className="tab__close"
               aria-label={`Close ${t.name}`}
-              title="Close (Ctrl+W)"
+              title={`Close (${shortcutLabel("file.close")})`}
               onClick={(e) => {
                 e.stopPropagation();
                 onClose(t.id);
@@ -59,7 +60,7 @@ export function TitleBar({ tabs, activeId, onActivate, onClose, onNew }: Props) 
           </div>
         ))}
         {tabs.length > 0 && (
-          <button className="titlebar__new" aria-label="Open a file" title="Open (Ctrl+O)" onClick={onNew}>
+          <button className="titlebar__new" aria-label="Open a file" title={`Open (${shortcutLabel("file.open")})`} onClick={onNew}>
             <Add16Regular />
           </button>
         )}

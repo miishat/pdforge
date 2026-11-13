@@ -1,3 +1,4 @@
+import { shortcutLabel } from "./commands";
 import { DocumentAdd20Regular, Dismiss16Regular, FolderOpen20Regular } from "@fluentui/react-icons";
 import { Mark } from "./Mark";
 import type { RecoveryMeta } from "../platform";
@@ -31,7 +32,7 @@ export function StartScreen({ recent, missing, onOpen, onCreate, onOpenRecent, o
           <button className="button button--primary button--large" onClick={onOpen}>
             <FolderOpen20Regular />
             Open a PDF
-            <kbd>Ctrl+O</kbd>
+            <kbd>{shortcutLabel("file.open")}</kbd>
           </button>
           <button className="button button--large" onClick={onCreate} title="From Word, Excel, PowerPoint, web pages, text or images">
             <DocumentAdd20Regular />

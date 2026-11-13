@@ -1,3 +1,4 @@
+import { isMac } from "../platform";
 import { useMemo, useState } from "react";
 import { COMMAND_BY_ID, COMMANDS, comboOf, conflicts, displayCombo, effectiveKeymap, RESERVED, VIM_KEYS, type Keymap } from "./commands";
 import { Dialog } from "./components/Dialog";
@@ -16,7 +17,7 @@ export function ShortcutsDialog({ overrides, vim, onChange, onVim, onClose }: { 
     if (e.key === "Escape") return setRecording(null);
     const combo = comboOf(e.nativeEvent);
     if (!combo) return;
-    if (RESERVED.has(combo)) return setMessage(`${displayCombo(combo)} is reserved by Windows or the app, so it can't be used.`);
+    if (RESERVED.has(combo)) return setMessage(`${displayCombo(combo)} is reserved by ${isMac ? "macOS" : "Windows"} or the app, so it can't be used.`);
     const clash = conflicts(keymap, combo, id);
     const next: Keymap = { ...overrides, [id]: [combo] };
     // A shortcut does one thing: take it away from the command that had it.

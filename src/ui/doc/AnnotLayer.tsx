@@ -155,26 +155,28 @@ export const AnnotLayer = memo(function AnnotLayer(p: Props) {
     }
   }
 
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (poly) setPoly({ ...poly, cur: toPagePt(e) });
-    if (!drag) return;
-    const pt = toPagePt(e);
-    if (drag.kind === "ink") setDrag({ kind: "ink", points: [...drag.points, pt] });
-    else if (drag.kind === "shape") setDrag({ ...drag, cur: e.shiftKey ? constrain(drag.start, pt, p.tool!) : pt });
-    else if (drag.kind === "move") setDrag({ ...drag, cur: pt, moved: drag.moved || Math.hypot(pt[0] - drag.start[0], pt[1] - drag.start[1]) > 1.5 });
-    else if (drag.kind === "resize") {
-      const r = [...drag.rect] as Rect;
-      // Corners: 0 top-left, 1 top-right, 2 bottom-right, 3 bottom-left (page space).
-      if (drag.corner === 0 || drag.corner === 3) r[0] = pt[0];
-      else r[2] = pt[0];
-      if (drag.corner === 0 || drag.corner === 1) r[1] = pt[1];
-      else r[3] = pt[1];
-      setDrag({ ...drag, cur: r });
-    }
+  /** The drag with the pointer at `pt` (Shift keeps shapes straight or square). */
+  const advance = (d: NonNullable<typeof drag>, pt: Point, shift: boolean): NonNullable<typeof drag> => {
+    if (d.kind === "ink") return { kind: "ink", points: [...d.points, pt] };
+    if (d.kind === "shape") return { ...d, cur: shift ? constrain(d.start, pt, p.tool!) : pt };
+    if (d.kind === "move") return { ...d, cur: pt, moved: d.moved || Math.hypot(pt[0] - d.start[0], pt[1] - d.start[1]) > 1.5 };
+    const r = [...d.rect] as Rect;
+    // Corners: 0 top-left, 1 top-right, 2 bottom-right, 3 bottom-left (page space).
+    if (d.corner === 0 || d.corner === 3) r[0] = pt[0];
+    else r[2] = pt[0];
+    if (d.corner === 0 || d.corner === 1) r[1] = pt[1];
+    else r[3] = pt[1];
+    return { ...d, cur: r };
   };
 
-  const onPointerUp = () => {
-    const d = drag;
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (poly) setPoly({ ...poly, cur: toPagePt(e) });
+    if (drag) setDrag(advance(drag, toPagePt(e), e.shiftKey));
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    // Finish where the pointer was let go: the last move may not have been drawn yet. (Ink keeps its own points.)
+    const d = drag && (drag.kind === "ink" ? drag : advance(drag, toPagePt(e), e.shiftKey));
     setDrag(null);
     if (!d) return;
     const t = p.tool;

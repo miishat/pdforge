@@ -1,6 +1,7 @@
 // Every action that can go in the command palette or on a keyboard shortcut. Shortcuts are
 // stored as normalised strings ("Ctrl+Shift+S", "F3", "Alt+ArrowLeft", "V") and can be rebound;
 // user overrides live in settings and replace the defaults per command.
+import { isMac } from "../platform/os";
 import { load, save } from "./settings";
 
 export type CommandCategory = "File" | "View" | "Navigate" | "Tools" | "Mode" | "Edit" | "Protect" | "Window";
@@ -11,6 +12,8 @@ export interface CommandDef {
   category: CommandCategory;
   /** Default shortcuts (empty: none, still in the palette). */
   keys: string[];
+  /** Default shortcuts on a Mac, where they differ (Mac conventions, or keys macOS uses itself). "Ctrl" means ⌘. */
+  macKeys?: string[];
   /** Works while typing in a text field (shortcuts with Ctrl, like Save). */
   inInput?: boolean;
   /** Extra words the palette matches on. */
@@ -25,7 +28,7 @@ export const COMMANDS: CommandDef[] = [
   { id: "file.saveAs", label: "Save as…", category: "File", keys: ["Ctrl+Shift+S"], inInput: true },
   { id: "file.print", label: "Print…", category: "File", keys: ["Ctrl+P"], inInput: true },
   { id: "file.properties", label: "Document properties", category: "File", keys: ["Ctrl+D"], inInput: true },
-  { id: "file.close", label: "Close tab", category: "File", keys: ["Ctrl+W", "Ctrl+F4"], inInput: true },
+  { id: "file.close", label: "Close tab", category: "File", keys: ["Ctrl+W", "Ctrl+F4"], macKeys: ["Ctrl+W"], inInput: true },
   { id: "file.export", label: "Export as Word, Markdown, HTML, text or images…", category: "File", keys: [], keywords: "docx convert" },
   { id: "file.exportComments", label: "Export comments…", category: "File", keys: [], keywords: "xfdf" },
   { id: "file.importComments", label: "Import comments…", category: "File", keys: [], keywords: "xfdf" },
@@ -57,13 +60,13 @@ export const COMMANDS: CommandDef[] = [
   // Navigate
   { id: "nav.find", label: "Find in document", category: "Navigate", keys: ["Ctrl+F"], inInput: true, keywords: "search" },
   { id: "nav.findBookmark", label: "Find a bookmark or chapter", category: "Navigate", keys: ["Ctrl+Shift+B"], inInput: true, keywords: "search outline contents toc section heading" },
-  { id: "nav.findNext", label: "Find next", category: "Navigate", keys: ["F3"], inInput: true },
-  { id: "nav.findPrev", label: "Find previous", category: "Navigate", keys: ["Shift+F3"], inInput: true },
-  { id: "nav.goto", label: "Go to page…", category: "Navigate", keys: ["Ctrl+G"], inInput: true },
+  { id: "nav.findNext", label: "Find next", category: "Navigate", keys: ["F3"], macKeys: ["Ctrl+G", "F3"], inInput: true },
+  { id: "nav.findPrev", label: "Find previous", category: "Navigate", keys: ["Shift+F3"], macKeys: ["Ctrl+Shift+G", "Shift+F3"], inInput: true },
+  { id: "nav.goto", label: "Go to page…", category: "Navigate", keys: ["Ctrl+G"], macKeys: ["Ctrl+Alt+G"], inInput: true },
   { id: "nav.first", label: "First page", category: "Navigate", keys: ["Home"] },
   { id: "nav.last", label: "Last page", category: "Navigate", keys: ["End"] },
-  { id: "nav.back", label: "Back", category: "Navigate", keys: ["Alt+ArrowLeft"], inInput: true },
-  { id: "nav.forward", label: "Forward", category: "Navigate", keys: ["Alt+ArrowRight"], inInput: true },
+  { id: "nav.back", label: "Back", category: "Navigate", keys: ["Alt+ArrowLeft"], macKeys: ["Ctrl+["], inInput: true },
+  { id: "nav.forward", label: "Forward", category: "Navigate", keys: ["Alt+ArrowRight"], macKeys: ["Ctrl+]"], inInput: true },
   // Tools
   { id: "tool.select", label: "Select tool", category: "Tools", keys: ["V"] },
   { id: "tool.hand", label: "Hand tool", category: "Tools", keys: ["H"] },
@@ -71,7 +74,7 @@ export const COMMANDS: CommandDef[] = [
   { id: "tool.snapshot", label: "Snapshot tool", category: "Tools", keys: ["G"] },
   // Edit
   { id: "edit.undo", label: "Undo", category: "Edit", keys: ["Ctrl+Z"] },
-  { id: "edit.redo", label: "Redo", category: "Edit", keys: ["Ctrl+Y", "Ctrl+Shift+Z"] },
+  { id: "edit.redo", label: "Redo", category: "Edit", keys: ["Ctrl+Y", "Ctrl+Shift+Z"], macKeys: ["Ctrl+Shift+Z", "Ctrl+Y"] },
   { id: "edit.copy", label: "Copy selected text", category: "Edit", keys: ["Ctrl+C"] },
   { id: "edit.selectAll", label: "Select all", category: "Edit", keys: ["Ctrl+A"] },
   { id: "edit.flatten", label: "Flatten comments and fields…", category: "Edit", keys: [] },
@@ -128,9 +131,35 @@ export function comboOf(e: Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "met
   return parts.join("+");
 }
 
-/** "Ctrl+Plus" → "Ctrl++", for display. */
-export function displayCombo(c: string): string {
-  return c.replace(/Plus$/, "+").replace(/Minus$/, "−").replace("ArrowLeft", "←").replace("ArrowRight", "→").replace("ArrowUp", "↑").replace("ArrowDown", "↓");
+const ARROWS: Record<string, string> = { ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓" };
+
+/**
+ * A shortcut for display: "Ctrl+Plus" → "Ctrl++" on Windows, and in the Mac style on a Mac ("Ctrl+Shift+S" → "⇧⌘S",
+ * modifiers in Apple's order ⌃⌥⇧⌘). "Ctrl" is ⌘ on a Mac, except with Tab, where ⌘Tab belongs to macOS and the
+ * real Control key is meant.
+ */
+export function displayCombo(c: string, mac = isMac): string {
+  const parts = c.split("+");
+  // "Ctrl+Plus" splits fine; a literal "+" key can't occur (it's stored as "Plus").
+  let key = parts.pop()!;
+  key = key === "Plus" ? "+" : key === "Minus" ? "−" : (ARROWS[key] ?? key);
+  if (!mac) return [...parts, key].join("+");
+  const has = (m: string) => parts.includes(m);
+  const tab = key === "Tab";
+  const named: Record<string, string> = { Tab: "⇥", Escape: "⎋", Enter: "↩", Backspace: "⌫", Delete: "⌦", Space: "Space" };
+  return `${tab && has("Ctrl") ? "⌃" : ""}${has("Alt") ? "⌥" : ""}${has("Shift") ? "⇧" : ""}${!tab && has("Ctrl") ? "⌘" : ""}${named[key] ?? key}`;
+}
+
+/** A command's default shortcuts on this system. */
+export function defaultKeys(c: CommandDef, mac = isMac): string[] {
+  return mac && c.macKeys ? c.macKeys : c.keys;
+}
+
+/** A command's first default shortcut, ready to show in a tooltip or menu ("Ctrl+S", or "⌘S" on a Mac). */
+export function shortcutLabel(id: string, mac = isMac): string {
+  const c = COMMAND_BY_ID.get(id);
+  const k = c && defaultKeys(c, mac)[0];
+  return k ? displayCombo(k, mac) : "";
 }
 
 export type Keymap = Record<string, string[]>;
@@ -147,9 +176,9 @@ export function saveOverrides(k: Keymap) {
 }
 
 /** The effective shortcuts for every command. */
-export function effectiveKeymap(overrides: Keymap): Keymap {
+export function effectiveKeymap(overrides: Keymap, mac = isMac): Keymap {
   const out: Keymap = {};
-  for (const c of COMMANDS) out[c.id] = overrides[c.id] ?? c.keys;
+  for (const c of COMMANDS) out[c.id] = overrides[c.id] ?? defaultKeys(c, mac);
   return out;
 }
 
@@ -166,7 +195,10 @@ export function conflicts(keymap: Keymap, combo: string, except: string): string
 }
 
 /** Shortcuts the system or WebView2 reserve; binding them would never fire or would break things. */
-export const RESERVED = new Set(["Alt+F4", "Ctrl+Alt+Delete", "Alt+Tab", "Ctrl+Shift+Escape", "Escape", "Tab", "Shift+Tab", "Enter", "Space"]);
+const RESERVED_ALL = ["Alt+F4", "Ctrl+Alt+Delete", "Alt+Tab", "Ctrl+Shift+Escape", "Escape", "Tab", "Shift+Tab", "Enter", "Space"];
+/** macOS's own: ⌘H hide, ⌘M minimize, ⌘Q quit, ⌘` next window, ⌘Space Spotlight, ⌘, settings. */
+const RESERVED_MAC = ["Ctrl+H", "Ctrl+M", "Ctrl+Q", "Ctrl+`", "Ctrl+Space", "Ctrl+,", "Ctrl+Alt+H", "Ctrl+Alt+Escape"];
+export const RESERVED = new Set(isMac ? [...RESERVED_ALL, ...RESERVED_MAC] : RESERVED_ALL);
 
 /** Fuzzy match for the palette: every query word must start a word of the label (or keywords), or appear in it. */
 export function matchScore(c: CommandDef, query: string): number {

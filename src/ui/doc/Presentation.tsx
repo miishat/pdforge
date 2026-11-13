@@ -47,7 +47,18 @@ export function Presentation({ info, start, onExit }: { info: DocInfo; start: nu
       }
     };
     window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    // Safari's engine leaves full screen on Esc without passing the key on, so leaving full screen ends the
+    // presentation too.
+    let entered = false;
+    const onFullscreen = () => {
+      if (document.fullscreenElement) entered = true;
+      else if (entered) onExit(pageRef.current);
+    };
+    document.addEventListener("fullscreenchange", onFullscreen);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("fullscreenchange", onFullscreen);
+    };
   }, [info.pageCount, onExit]);
 
   // Show the page counter briefly after each change.

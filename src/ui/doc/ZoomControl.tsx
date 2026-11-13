@@ -1,3 +1,4 @@
+import { shortcutLabel } from "../commands";
 import { ChevronDown16Regular } from "@fluentui/react-icons";
 import { useState } from "react";
 import { Menu } from "../components/Menu";
@@ -51,9 +52,9 @@ export function ZoomControl({ zoom, mode, onMode }: { zoom: number; mode: ZoomMo
           onClose={() => setMenu(null)}
           entries={[
             { label: "Automatic", checked: mode.kind === "auto", onSelect: () => onMode({ kind: "auto" }) },
-            { label: "Fit width", shortcut: "Ctrl+2", checked: mode.kind === "fit-width", onSelect: () => onMode({ kind: "fit-width" }) },
-            { label: "Fit page", shortcut: "Ctrl+0", checked: mode.kind === "fit-page", onSelect: () => onMode({ kind: "fit-page" }) },
-            { label: "Actual size", shortcut: "Ctrl+1", checked: mode.kind === "custom" && mode.zoom === 1, onSelect: () => onMode({ kind: "custom", zoom: 1 }) },
+            { label: "Fit width", shortcut: shortcutLabel("view.fitWidth"), checked: mode.kind === "fit-width", onSelect: () => onMode({ kind: "fit-width" }) },
+            { label: "Fit page", shortcut: shortcutLabel("view.fitPage"), checked: mode.kind === "fit-page", onSelect: () => onMode({ kind: "fit-page" }) },
+            { label: "Actual size", shortcut: shortcutLabel("view.actualSize"), checked: mode.kind === "custom" && mode.zoom === 1, onSelect: () => onMode({ kind: "custom", zoom: 1 }) },
             { kind: "separator" },
             ...PRESETS.map((z) => ({
               label: formatZoom(z),

@@ -1,3 +1,4 @@
+import { downloadName } from "./helpers";
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -103,7 +104,7 @@ test("extract a table to Excel", async ({ page }) => {
   await expect(dialog.locator(".table-preview th").first()).toHaveText("Region");
   await expect(dialog.locator(".table-preview tr").nth(3)).toContainText("West coast");
   const [download] = await Promise.all([page.waitForEvent("download"), dialog.getByRole("button", { name: "Export…" }).click()]);
-  expect(download.suggestedFilename()).toBe("table tables.xlsx");
+  expect(downloadName(download)).toBe("table tables.xlsx");
   expect(readFileSync(await download.path()).subarray(0, 2).toString()).toBe("PK");
 });
 
@@ -132,7 +133,7 @@ test("batch: compress several files", async ({ page }) => {
   const [chooser] = await Promise.all([page.waitForEvent("filechooser"), dialog.getByRole("button", { name: "Choose files…" }).click()]);
   await chooser.setFiles([fixture("photo.pdf"), fixture("sample.pdf"), fixture("encrypted.pdf")]);
   const downloads: string[] = [];
-  page.on("download", (d) => downloads.push(d.suggestedFilename()));
+  page.on("download", (d) => downloads.push(downloadName(d)));
   await dialog.getByRole("button", { name: "Run on 3 files" }).click();
   await expect(dialog.getByText("2 of 3 files done; 1 failed.")).toBeVisible({ timeout: 60_000 });
   expect(downloads.sort()).toEqual(["photo (processed).pdf", "sample (processed).pdf"]);

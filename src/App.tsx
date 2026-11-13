@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { engine } from "./core/client";
 import type { DocInfo } from "./core/types";
 import {
-  fromBrowserFile, isDesktop, launchFiles, onOpenFiles, onWindowCloseRequested, pickFiles, pickPdfs, readPath, recoveryClear, recoveryList,
+  fromBrowserFile, isDesktop, isMac, launchFiles, onOpenFiles, onWindowCloseRequested, pickFiles, pickPdfs, readPath, recoveryClear, recoveryList,
   recoveryRead, savedTextStore, addRecentDocument, setWindowTitle, appVersion, type AvailableUpdate, type PickedFile, type RecoveryMeta,
 } from "./platform";
 import { UnsavedDialog } from "./ui/doc/Dialogs";
 import { DocumentView, type DocCommands, type ViewHandle } from "./ui/doc/DocumentView";
-import { COMMAND_BY_ID, comboOf, effectiveKeymap, loadOverrides, loadVim, reverseKeymap, saveOverrides, saveVim, type Keymap } from "./ui/commands";
+import { EDIT_ROUTED, menuLayout } from "./ui/appMenu";
+import { setAppMenu } from "./platform/menu";
+import { COMMAND_BY_ID, shortcutLabel, comboOf, effectiveKeymap, loadOverrides, loadVim, reverseKeymap, saveOverrides, saveVim, type Keymap } from "./ui/commands";
 import { CommandPalette } from "./ui/CommandPalette";
 import { ShortcutsDialog } from "./ui/ShortcutsDialog";
 import { CompareView, type CompareSide } from "./ui/compare/CompareView";
@@ -31,6 +33,9 @@ function formatMB(bytes: number): string {
 
 /** Distinguishes this run's recovery files from those left by a previous (crashed) run. */
 const SESSION = Date.now().toString(36);
+
+/** Whether the user is typing in a text field (where single-key shortcuts and the document's Undo don't apply). */
+const typing = () => /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement as HTMLElement)?.tagName ?? "") || !!(document.activeElement as HTMLElement)?.isContentEditable;
 
 export function App() {
   const { tabs, activeId, setActiveId, open, unlock, close: closeNow, cycle, setDirty, relocate, setInfo } = useTabs();
@@ -91,7 +96,7 @@ export function App() {
     setNotice(null);
     const error = await defaultApp.makeDefault();
     if (error) setNotice(error);
-    else setInfoNote("In Settings, choose PDForge for .pdf files. You can do this later from the command palette (Ctrl+K): “Make PDForge the default PDF app…”.");
+    else setInfoNote(`In Settings, choose PDForge for .pdf files. You can do this later from the command palette (${shortcutLabel("window.palette")}): “Make PDForge the default PDF app…”.`);
   }, [defaultApp]);
   const installUpdate = useCallback(
     async (update: AvailableUpdate) => {
@@ -266,7 +271,7 @@ export function App() {
     "window.split": activeTab?.state.kind === "ready" ? toggleSplit : undefined,
     "window.syncScroll": splitOn ? () => setSyncScroll((v) => !v) : undefined,
     "window.shortcuts": () => setShortcuts(true),
-    "window.defaultApp": isDesktop ? () => void makeDefault() : undefined,
+    "window.defaultApp": isDesktop && !isMac ? () => void makeDefault() : undefined,
     "window.clearSearchData": async () => {
       setNotice(null);
       try {
@@ -283,7 +288,7 @@ export function App() {
           const on = !autoUpdatesOn();
           setAutoUpdates(on);
           setNotice(null);
-          setInfoNote(on ? "PDForge will check for updates on its own." : "Automatic update checks are off. Use “Check for updates…” in the command palette (Ctrl+K) any time.");
+          setInfoNote(on ? "PDForge will check for updates on its own." : `Automatic update checks are off. Use “Check for updates…” in the command palette (${shortcutLabel("window.palette")}) any time.`);
         }
       : undefined,
   };
@@ -295,10 +300,27 @@ export function App() {
     if (app) app();
     else docCommands.current?.run(id);
   }, []);
+  /** The last command run from the keyboard, so a Mac menu item with the same shortcut doesn't run it twice. */
+  const lastKeyCommand = useRef({ id: "", at: 0 });
+
+  // The Mac menu bar: the same commands, run the same way as from the keyboard or the palette.
+  const runMenuCommand = useCallback(
+    (id: string) => {
+      if (lastKeyCommand.current.id === id && performance.now() - lastKeyCommand.current.at < 300) return;
+      // Undo and Redo act on the text being typed, if any.
+      if (EDIT_ROUTED.has(id) && typing()) return void document.execCommand(id === "edit.undo" ? "undo" : "redo");
+      if (document.querySelector("dialog[open]") || !available(id)) return;
+      runCommand(id);
+    },
+    [available, runCommand],
+  );
+  useEffect(() => {
+    if (!isDesktop || !isMac) return;
+    setAppMenu(menuLayout(keymap), runMenuCommand, version).catch((err) => console.warn("Menu bar:", err));
+  }, [keymap, runMenuCommand, version]);
 
   useEffect(() => {
     const reverse = reverseKeymap(keymap);
-    const typing = () => /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement as HTMLElement)?.tagName ?? "") || !!(document.activeElement as HTMLElement)?.isContentEditable;
     let lastG = 0;
     const VIM: Record<string, string> = { j: "vim.down", k: "vim.up", d: "vim.halfDown", u: "vim.halfUp", h: "vim.prevPage", l: "vim.nextPage", G: "vim.last", "/": "vim.find", n: "vim.next", N: "vim.prev" };
     const onKey = (e: KeyboardEvent) => {
@@ -326,6 +348,7 @@ export function App() {
       if (typing() && !COMMAND_BY_ID.get(id)?.inInput) return;
       if (!available(id)) return;
       e.preventDefault();
+      lastKeyCommand.current = { id, at: performance.now() };
       runCommand(id);
     };
     window.addEventListener("keydown", onKey);

@@ -79,29 +79,31 @@ export const EditLayer = memo(function EditLayer(p: Props) {
     if (p.tool === "link") p.onSelectLink(p.page, null);
   };
 
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!drag) return;
-    const q = pt(e);
-    if (drag.kind === "area") setDrag({ ...drag, cur: q });
-    else if (drag.kind === "move") setDrag({ ...drag, cur: q, moved: drag.moved || Math.hypot(q[0] - drag.start[0], q[1] - drag.start[1]) > 1.5 });
-    else {
-      const r = [...drag.rect] as Rect;
-      if (drag.corner === 0 || drag.corner === 3) r[0] = q[0];
-      else r[2] = q[0];
-      if (drag.corner === 0 || drag.corner === 1) r[1] = q[1];
-      else r[3] = q[1];
-      // Images keep their proportions when resized.
-      const aspect = (drag.rect[2] - drag.rect[0]) / (drag.rect[3] - drag.rect[1]);
-      const w = Math.abs(r[2] - r[0]);
-      const h = w / aspect;
-      if (drag.corner === 0 || drag.corner === 1) r[1] = r[3] - h;
-      else r[3] = r[1] + h;
-      setDrag({ ...drag, cur: r });
-    }
+  /** The drag with the pointer at `q`. */
+  const advance = (d: NonNullable<typeof drag>, q: Point): NonNullable<typeof drag> => {
+    if (d.kind === "area") return { ...d, cur: q };
+    if (d.kind === "move") return { ...d, cur: q, moved: d.moved || Math.hypot(q[0] - d.start[0], q[1] - d.start[1]) > 1.5 };
+    const r = [...d.rect] as Rect;
+    if (d.corner === 0 || d.corner === 3) r[0] = q[0];
+    else r[2] = q[0];
+    if (d.corner === 0 || d.corner === 1) r[1] = q[1];
+    else r[3] = q[1];
+    // Images keep their proportions when resized.
+    const aspect = (d.rect[2] - d.rect[0]) / (d.rect[3] - d.rect[1]);
+    const w = Math.abs(r[2] - r[0]);
+    const h = w / aspect;
+    if (d.corner === 0 || d.corner === 1) r[1] = r[3] - h;
+    else r[3] = r[1] + h;
+    return { ...d, cur: r };
   };
 
-  const onPointerUp = () => {
-    const d = drag;
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (drag) setDrag(advance(drag, pt(e)));
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    // Finish where the pointer was let go: the last move may not have been drawn yet.
+    const d = drag && advance(drag, pt(e));
     setDrag(null);
     if (!d) return;
     if (d.kind === "area") {

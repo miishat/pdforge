@@ -1,3 +1,4 @@
+import { shortcutLabel } from "../commands";
 import {
   ArrowRotateClockwise20Regular,
   ArrowRotateCounterclockwise20Regular,
@@ -99,17 +100,17 @@ export function Toolbar(p: Props) {
         </button>
         <PageInput info={info} current={currentPage} onGo={p.onGoPage} />
         <div className="toolbar__divider" />
-        <button className="icon-button" aria-label="Zoom out" title="Zoom out (Ctrl+−)" onClick={() => p.onZoomStep(-1)}>
+        <button className="icon-button" aria-label="Zoom out" title={`Zoom out (${shortcutLabel("view.zoomOut")})`} onClick={() => p.onZoomStep(-1)}>
           <ZoomOut20Regular />
         </button>
         <ZoomControl zoom={p.zoom} mode={p.zoomMode} onMode={p.onZoomMode} />
-        <button className="icon-button" aria-label="Zoom in" title="Zoom in (Ctrl++)" onClick={() => p.onZoomStep(1)}>
+        <button className="icon-button" aria-label="Zoom in" title={`Zoom in (${shortcutLabel("view.zoomIn")})`} onClick={() => p.onZoomStep(1)}>
           <ZoomIn20Regular />
         </button>
       </div>
 
       <div className="toolbar__side toolbar__side--end">
-        <button className="icon-button" aria-label="Find" title="Find (Ctrl+F)" aria-pressed={p.searchOpen} onClick={p.onSearch}>
+        <button className="icon-button" aria-label="Find" title={`Find (${shortcutLabel("nav.find")})`} aria-pressed={p.searchOpen} onClick={p.onSearch}>
           <Search20Regular />
         </button>
         <MenuButton
@@ -121,8 +122,8 @@ export function Toolbar(p: Props) {
             { label: "Two pages", icon: <DocumentMultiple20Regular />, checked: p.layoutMode === "two-page", onSelect: () => p.onLayout("two-page") },
             { label: "Two pages with cover", icon: <BookOpen20Regular />, checked: p.layoutMode === "two-page-cover", onSelect: () => p.onLayout("two-page-cover") },
             { kind: "separator" },
-            { label: "Rotate clockwise", icon: <ArrowRotateClockwise20Regular />, shortcut: "Ctrl+Shift++", onSelect: () => p.onRotate(90) },
-            { label: "Rotate counterclockwise", icon: <ArrowRotateCounterclockwise20Regular />, shortcut: "Ctrl+Shift+−", onSelect: () => p.onRotate(-90) },
+            { label: "Rotate clockwise", icon: <ArrowRotateClockwise20Regular />, shortcut: shortcutLabel("view.rotateCw"), onSelect: () => p.onRotate(90) },
+            { label: "Rotate counterclockwise", icon: <ArrowRotateCounterclockwise20Regular />, shortcut: shortcutLabel("view.rotateCcw"), onSelect: () => p.onRotate(-90) },
             { kind: "separator" },
             { kind: "heading", label: "Reading mode" },
             { label: "Normal", icon: <WeatherSunny20Regular />, checked: p.readingMode === "normal", onSelect: () => p.onReadingMode("normal") },
@@ -133,11 +134,11 @@ export function Toolbar(p: Props) {
             { label: "Snapshot (copy area as image)", icon: <Screenshot20Regular />, shortcut: "G", onSelect: () => p.onTool("snapshot") },
             { label: "Marquee zoom", icon: <ZoomFit20Regular />, shortcut: "Z", onSelect: () => p.onTool("marquee") },
             { kind: "separator" },
-            { label: "Presentation", icon: <Presenter20Regular />, shortcut: "Ctrl+L", onSelect: p.onPresent },
+            { label: "Presentation", icon: <Presenter20Regular />, shortcut: shortcutLabel("view.present"), onSelect: p.onPresent },
             {
               label: "Read aloud",
               icon: <ReadAloud20Regular />,
-              shortcut: "Ctrl+Shift+Y",
+              shortcut: shortcutLabel("view.readAloud"),
               disabled: !p.speechAvailable,
               reason: "No text-to-speech voices are available on this computer.",
               onSelect: p.onReadAloud,
@@ -148,8 +149,8 @@ export function Toolbar(p: Props) {
           label="More"
           icon={<MoreHorizontal20Regular />}
           entries={() => [
-            { label: "Save", icon: <Save20Regular />, shortcut: "Ctrl+S", onSelect: p.onSave },
-            { label: "Save as…", icon: <SaveEdit20Regular />, shortcut: "Ctrl+Shift+S", onSelect: p.onSaveAs },
+            { label: "Save", icon: <Save20Regular />, shortcut: shortcutLabel("file.save"), onSelect: p.onSave },
+            { label: "Save as…", icon: <SaveEdit20Regular />, shortcut: shortcutLabel("file.saveAs"), onSelect: p.onSaveAs },
             { kind: "separator" },
             { label: "Export comments…", icon: <ArrowExport20Regular />, onSelect: p.onExportComments },
             { label: "Import comments…", icon: <ArrowImport20Regular />, onSelect: p.onImportComments },
@@ -158,15 +159,15 @@ export function Toolbar(p: Props) {
             { label: "Extract tables…", icon: <Table20Regular />, onSelect: () => p.onCommand("edit.tables") },
             { kind: "separator" },
             { label: "Compare with another PDF…", icon: <DocumentSearch20Regular />, onSelect: () => p.onCommand("file.compare") },
-            { label: "Split view", icon: <SplitVertical20Regular />, shortcut: "Ctrl+\\", onSelect: () => p.onCommand("window.split") },
+            { label: "Split view", icon: <SplitVertical20Regular />, shortcut: shortcutLabel("window.split"), onSelect: () => p.onCommand("window.split") },
             { label: "Batch actions…", icon: <DocumentMultiple20Regular />, onSelect: () => p.onCommand("file.batch") },
             { kind: "separator" },
             { label: "Assistant", icon: <Sparkle20Regular />, onSelect: () => p.onCommand("window.assistant") },
-            { label: "Command palette", icon: <Search20Regular />, shortcut: "Ctrl+K", onSelect: () => p.onCommand("window.palette") },
+            { label: "Command palette", icon: <Search20Regular />, shortcut: shortcutLabel("window.palette"), onSelect: () => p.onCommand("window.palette") },
             { label: "Keyboard shortcuts…", icon: <Keyboard20Regular />, onSelect: () => p.onCommand("window.shortcuts") },
             { kind: "separator" },
-            { label: "Print…", icon: <Print20Regular />, shortcut: "Ctrl+P", onSelect: p.onPrint },
-            { label: "Document properties", icon: <Info20Regular />, shortcut: "Ctrl+D", onSelect: p.onProperties },
+            { label: "Print…", icon: <Print20Regular />, shortcut: shortcutLabel("file.print"), onSelect: p.onPrint },
+            { label: "Document properties", icon: <Info20Regular />, shortcut: shortcutLabel("file.properties"), onSelect: p.onProperties },
           ]}
         />
       </div>

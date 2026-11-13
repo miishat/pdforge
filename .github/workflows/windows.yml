@@ -45,6 +45,9 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps webkit
       - run: npm run test:e2e:webkit
+      # What each failing test saw, in the log (quicker to read than the report).
+      - if: failure()
+        run: for f in test-results/webkit/*/error-context.md; do echo "::group::$f"; cat "$f"; echo "::endgroup::"; done
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

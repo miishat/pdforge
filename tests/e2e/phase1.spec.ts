@@ -117,9 +117,11 @@ test.describe("search", () => {
 });
 
 test.describe("selection", () => {
-  test.use({ permissions: ["clipboard-read", "clipboard-write"] });
+  // WebKit's test browser has no clipboard permissions to grant; there, the test checks the copy happened but
+  // can't read the clipboard back.
+  test.use({ permissions: async ({ browserName }, use) => use(browserName === "chromium" ? ["clipboard-read", "clipboard-write"] : []) });
 
-  test("drag selects text and Ctrl+C copies it", async ({ page }) => {
+  test("drag selects text and Ctrl+C copies it", async ({ page, browserName }) => {
     await open(page, "features.pdf");
     await page.getByRole("button", { name: "Next page" }).click();
     await expect(page.getByLabel("Page number")).toHaveValue("2");
@@ -135,6 +137,7 @@ test.describe("selection", () => {
     await expect(view(page).locator(".selection")).not.toHaveCount(0);
     await page.keyboard.press("Control+c");
     await expect(page.locator(".status-line")).toHaveText("Copied");
+    if (browserName !== "chromium") return;
     const text = await page.evaluate(() => navigator.clipboard.readText());
     expect(text).toMatch(/^Mountains are tall/);
   });

@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { caretAt, charRect, hitRects, lineAt, wordAt } from "../../core/textlayer";
 import type { DocInfo, LinkInfo, Rect, SearchHit, ViewRotation } from "../../core/types";
+import { isMac } from "../../platform/os";
 import { rotatedSize, toPage, toView } from "../geometry";
 import { GAP, layoutPages, pagesInRange, rowAt, type Layout, type LayoutMode } from "../layout";
 import { PREFETCH_PRIORITY, useDocData, type DocData } from "./docData";
@@ -68,6 +69,10 @@ const OVERSCAN = 1; // viewports above and below to keep rendered
 /** Drawing ahead, after scrolling pauses for this long: sharp pages past the mounted ones, then previews. */
 const DRAW_AHEAD_DELAY_MS = 150;
 const DRAW_AHEAD_PAGES = 3;
+/** How far a pinch spreads (Safari's gesture scale) for each zoom step. */
+const PINCH_STEP = 1.2;
+/** Safari's GestureEvent, which TypeScript's DOM types don't include. */
+type GestureLike = Event & { scale: number; clientX: number; clientY: number };
 const PREVIEW_AHEAD_PAGES = 12;
 const PREVIEW_BEHIND_PAGES = 4;
 
@@ -443,31 +448,56 @@ export const Canvas = forwardRef<CanvasHandle, Props>(function Canvas(props, ref
     el.dataset.cursor = overText ? "text" : "";
   };
 
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent) => {
     if (drag?.kind === "select" && SELECTION_TOOLS.has(effectiveTool as AnnotTool)) {
       setDrag(null);
       props.onMarkup?.();
       return;
     }
     if (drag?.kind === "area") {
-      const r: Rect = [Math.min(drag.x0, drag.x1), Math.min(drag.y0, drag.y1), Math.max(drag.x0, drag.x1), Math.max(drag.y0, drag.y1)];
+      // End where the pointer was let go: the last move may not have been drawn yet.
+      const hit = hitPage(e.clientX, e.clientY, true);
+      const [x1, y1] = hit && hit.page === drag.page ? hit.pt : [drag.x1, drag.y1];
+      const r: Rect = [Math.min(drag.x0, x1), Math.min(drag.y0, y1), Math.max(drag.x0, x1), Math.max(drag.y0, y1)];
       if (r[2] - r[0] > 4 && r[3] - r[1] > 4) props.onAreaDone(drag.tool, drag.page, r);
     }
     setDrag(null);
   };
 
   const onWheel = useRef<(e: WheelEvent) => void>(() => {});
+  const onGesture = useRef<(e: GestureLike) => void>(() => {});
   useEffect(() => {
     const el = scrollRef.current!;
     const handler = (e: WheelEvent) => onWheel.current(e);
     el.addEventListener("wheel", handler, { passive: false });
-    return () => el.removeEventListener("wheel", handler);
+    // Safari's engine (the Mac app) reports a trackpad pinch as gesture events rather than Ctrl+wheel.
+    const gesture = (e: Event) => onGesture.current(e as GestureLike);
+    for (const t of ["gesturestart", "gesturechange", "gestureend"]) el.addEventListener(t, gesture, { passive: false });
+    return () => {
+      el.removeEventListener("wheel", handler);
+      for (const t of ["gesturestart", "gesturechange", "gestureend"]) el.removeEventListener(t, gesture);
+    };
   }, []);
   onWheel.current = (e: WheelEvent) => {
-    if (!e.ctrlKey) return;
+    // Ctrl+wheel (and a pinch in Chromium); on a Mac, ⌘+wheel too.
+    if (!e.ctrlKey && !(isMac && e.metaKey)) return;
     e.preventDefault();
     zoomFocus.current = { x: e.clientX, y: e.clientY };
     props.onZoomStep(e.deltaY < 0 ? 1 : -1);
+  };
+  // A pinch zooms one step each time the fingers spread or close by another PINCH_STEP, keeping the point
+  // between them fixed.
+  const pinchSteps = useRef(0);
+  onGesture.current = (e) => {
+    e.preventDefault();
+    if (e.type === "gesturestart") pinchSteps.current = 0;
+    if (e.type !== "gesturechange" || !(e.scale > 0)) return;
+    const steps = Math.trunc(Math.log(e.scale) / Math.log(PINCH_STEP));
+    if (steps === pinchSteps.current) return;
+    const dir = steps > pinchSteps.current ? 1 : -1;
+    pinchSteps.current += dir;
+    zoomFocus.current = { x: e.clientX, y: e.clientY };
+    props.onZoomStep(dir);
   };
 
   const overlays = useMemo(() => {
