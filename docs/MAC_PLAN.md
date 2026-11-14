@@ -1,6 +1,6 @@
 # PDForge on macOS: plan
 
-Status: in progress (work on the `mac` branch; see "Progress" below). Estimate: 2–3 working days, plus one or two
+Status: in progress, on `main` (see "Progress" below). Estimate: 2–3 working days, plus one or two
 rounds of fixes after testing on a real Mac.
 
 ## Progress
@@ -13,6 +13,8 @@ Done:
     could land short. Affected images, comments, shapes and the area tools; now fixed on both systems.
   - Clicking a line in "Edit text" opened the editor and closed it at once.
   - Esc didn't end a presentation, because WebKit uses Esc to leave full screen. Leaving full screen now ends it too.
+  - A file that opened very quickly could be dropped, leaving its tab loading forever (a race that could also
+    happen on Windows).
 - **Window** (1): native Mac window buttons on the left, title bar laid out around them, full screen and tiling
   from the green button. PDForge's own minimize/maximize/close buttons stay on Windows only.
 - **Menu bar** (1): PDForge, File, Edit, View, Go, Tools and Window. It's built from the same command list as the
