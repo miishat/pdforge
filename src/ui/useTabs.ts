@@ -29,6 +29,8 @@ export function useTabs() {
   const [activeId, setActiveId] = useState<number | null>(null);
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
+  /** Tabs closed by the user. Checked when a file finishes opening; `tabsRef` can lag behind a tab just added. */
+  const closedIds = useRef(new Set<number>());
 
   const patch = (id: number, state: TabState) => setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, state } : t)));
 
@@ -45,7 +47,7 @@ export function useTabs() {
     setActiveId(id);
     try {
       const result = await engine().call("open", file.bytes);
-      if (!tabsRef.current.some((t) => t.id === id)) {
+      if (closedIds.current.has(id)) {
         // Closed while loading.
         const docId = result.status === "ok" ? result.info.docId : result.docId;
         void engine().call("close", docId);
@@ -78,6 +80,7 @@ export function useTabs() {
     const ts = tabsRef.current;
     const i = ts.findIndex((t) => t.id === id);
     if (i < 0) return;
+    closedIds.current.add(id);
     const s = ts[i].state;
     if (s.kind === "ready") void engine().call("close", s.info.docId);
     if (s.kind === "locked") void engine().call("close", s.docId);
