@@ -230,6 +230,16 @@ export async function setFullscreen(on: boolean): Promise<void> {
   }
 }
 
+/** Calls back with whether the window is full screen, now and whenever its size changes. Returns an unsubscribe. */
+export async function onFullscreenChange(cb: (on: boolean) => void): Promise<() => void> {
+  if (!isDesktop) return () => {};
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  const win = getCurrentWindow();
+  const check = () => void win.isFullscreen().then(cb, () => {});
+  check();
+  return win.onResized(check);
+}
+
 export async function windowAction(action: "minimize" | "toggleMaximize" | "close"): Promise<void> {
   if (!isDesktop) return;
   const { getCurrentWindow } = await import("@tauri-apps/api/window");

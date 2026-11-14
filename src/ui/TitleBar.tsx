@@ -1,6 +1,6 @@
 import { Add16Regular, Dismiss16Regular, Square16Regular, Subtract16Regular, LockClosed12Regular } from "@fluentui/react-icons";
-import { useEffect, useRef } from "react";
-import { isDesktop, showSnapLayouts, windowAction } from "../platform";
+import { useEffect, useRef, useState } from "react";
+import { isDesktop, isMac, onFullscreenChange, showSnapLayouts, windowAction } from "../platform";
 import { shortcutLabel } from "./commands";
 import { Mark } from "./Mark";
 import type { Tab } from "./useTabs";
@@ -25,8 +25,17 @@ export function TitleBar({ tabs, activeId, onActivate, onClose, onNew }: Props) 
     snapTimer.current = window.setTimeout(() => void showSnapLayouts(), SNAP_HOVER_MS);
   };
   useEffect(() => cancelSnap, []);
+  // On a Mac the system's window buttons sit on the left of this bar, except in full screen.
+  const macWindow = isDesktop && isMac;
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    if (!macWindow) return;
+    let off: (() => void) | undefined;
+    void onFullscreenChange(setFullscreen).then((u) => (off = u));
+    return () => off?.();
+  }, [macWindow]);
   return (
-    <header className="titlebar" data-tauri-drag-region>
+    <header className={`titlebar${macWindow ? " titlebar--mac" : ""}${macWindow && fullscreen ? " titlebar--fullscreen" : ""}`} data-tauri-drag-region>
       <div className="titlebar__brand" data-tauri-drag-region>
         <Mark size={16} />
       </div>
@@ -66,7 +75,7 @@ export function TitleBar({ tabs, activeId, onActivate, onClose, onNew }: Props) 
         )}
         <div className="titlebar__drag" data-tauri-drag-region />
       </div>
-      {isDesktop && (
+      {isDesktop && !isMac && (
         <div className="window-controls">
           <button aria-label="Minimize" onClick={() => windowAction("minimize")}>
             <Subtract16Regular />

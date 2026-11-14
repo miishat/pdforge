@@ -29,6 +29,8 @@
 
   /* Sizes */
   --titlebar-h: 40px;
+  /* Room on the left of the title bar for the Mac window buttons (positioned in tauri.macos.conf.json). */
+  --mac-window-buttons-w: 76px;
   --toolbar-h: 44px;
   --control-h: 32px;
 

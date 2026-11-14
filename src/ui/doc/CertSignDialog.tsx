@@ -1,3 +1,4 @@
+import { isMac } from "../../platform";
 import { Certificate20Regular, Warning16Regular } from "@fluentui/react-icons";
 import { useState } from "react";
 import { engine } from "../../core/client";
@@ -94,7 +95,7 @@ export function CertSignDialog({
             void unlock();
           }}
         >
-          <p className="muted">Choose your digital ID: a .pfx or .p12 file, for example one exported from Windows or issued by your organization.</p>
+          <p className="muted">Choose your digital ID: a .pfx or .p12 file, for example one exported from {isMac ? "Keychain Access" : "Windows"} or issued by your organization.</p>
           <div className="file-pick">
             <button
               type="button"

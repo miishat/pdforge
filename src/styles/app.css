@@ -51,6 +51,13 @@ kbd {
   background: var(--bg-chrome);
   flex: none;
 }
+/* Mac: the system draws its own window buttons on the left; full screen hides them. */
+.titlebar--mac {
+  padding-left: var(--mac-window-buttons-w);
+}
+.titlebar--mac.titlebar--fullscreen {
+  padding-left: 0;
+}
 .titlebar__brand {
   display: grid;
   place-items: center;

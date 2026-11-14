@@ -326,11 +326,19 @@ fn search_index_clear(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// The operating system's name, for messages.
+#[cfg(windows)]
+const SYSTEM: &str = "Windows";
+#[cfg(target_os = "macos")]
+const SYSTEM: &str = "macOS";
+#[cfg(not(any(windows, target_os = "macos")))]
+const SYSTEM: &str = "The system";
+
 fn io_message(path: &PathBuf, verb: &str, e: std::io::Error) -> String {
     match e.kind() {
         std::io::ErrorKind::NotFound => format!("{} doesn't exist any more.", path.display()),
         std::io::ErrorKind::PermissionDenied => format!(
-            "Windows didn't allow PDForge to {verb} {}. It may be open in another app, or the folder may be protected.",
+            "{SYSTEM} didn't allow PDForge to {verb} {}. It may be open in another app, or the folder may be protected.",
             path.display()
         ),
         _ => format!("Couldn't {verb} {}: {e}", path.display()),

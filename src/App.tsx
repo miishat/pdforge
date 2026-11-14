@@ -87,6 +87,11 @@ export function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [infoNote, setInfoNote] = useState<string | null>(null);
   const updates = useUpdates();
+  // The Mac app runs on the system's Safari engine; exports and saved search text need Safari 16.4 or later.
+  useEffect(() => {
+    if (isDesktop && isMac && typeof CompressionStream === "undefined")
+      setNotice("Some features (Word, Excel and image exports, quick repeat searches) need a newer Safari engine. Update macOS in System Settings > General > Software Update.");
+  }, []);
   const [version, setVersion] = useState<string | null>(null);
   useEffect(() => {
     void appVersion().then(setVersion, () => {});

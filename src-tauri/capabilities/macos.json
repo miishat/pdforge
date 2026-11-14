@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "macos",
+  "description": "Extra permissions for the main window on macOS: printing goes through the native print panel there.",
+  "windows": ["main"],
+  "platforms": ["macOS"],
+  "permissions": ["core:webview:allow-print"]
+}

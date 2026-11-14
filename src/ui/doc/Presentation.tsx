@@ -51,13 +51,19 @@ export function Presentation({ info, start, onExit }: { info: DocInfo; start: nu
     // presentation too.
     let entered = false;
     const onFullscreen = () => {
-      if (document.fullscreenElement) entered = true;
+      const doc = document as Document & { webkitFullscreenElement?: Element | null };
+      if (document.fullscreenElement ?? doc.webkitFullscreenElement) entered = true;
       else if (entered) onExit(pageRef.current);
     };
-    document.addEventListener("fullscreenchange", onFullscreen);
+    // Older Safari engines send only the prefixed event.
+    const events = ["fullscreenchange", "webkitfullscreenchange"];
+    for (const t of events) document.addEventListener(t, onFullscreen);
+    // Leaving full screen always resizes the window, in case no full-screen event arrives.
+    window.addEventListener("resize", onFullscreen);
     return () => {
+      window.removeEventListener("resize", onFullscreen);
       window.removeEventListener("keydown", onKey, true);
-      document.removeEventListener("fullscreenchange", onFullscreen);
+      for (const t of events) document.removeEventListener(t, onFullscreen);
     };
   }, [info.pageCount, onExit]);
 

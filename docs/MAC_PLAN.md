@@ -1,6 +1,58 @@
 # PDForge on macOS: plan
 
-Status: planned, not started (decisions made, see the end). Estimate: 2–3 working days, plus one or two rounds of fixes after testing on a real Mac.
+Status: in progress (work on the `mac` branch; see "Progress" below). Estimate: 2–3 working days, plus one or two
+rounds of fixes after testing on a real Mac.
+
+## Progress
+
+Done:
+
+- **WebKit end-to-end run in CI** (section 4). Every push runs all end-to-end tests in WebKit as well as Chromium.
+  Fixed what the first runs found:
+  - Drags finished at the last drawn position instead of where the pointer was released, so an image or comment
+    could land short. Affected images, comments, shapes and the area tools; now fixed on both systems.
+  - Clicking a line in "Edit text" opened the editor and closed it at once.
+  - Esc didn't end a presentation, because WebKit uses Esc to leave full screen. Leaving full screen now ends it too.
+- **Window** (1): native Mac window buttons on the left, title bar laid out around them, full screen and tiling
+  from the green button. PDForge's own minimize/maximize/close buttons stay on Windows only.
+- **Menu bar** (1): PDForge, File, Edit, View, Go, Tools and Window. It's built from the same command list as the
+  command palette, so new commands appear in it automatically and rebound shortcuts show in it.
+  - Edit's Cut, Copy, Paste and Select All are macOS's own, so they work in text fields. Undo and Redo work on the
+    text field you're typing in, and on the document otherwise.
+  - ⌘Q asks about unsaved changes, like closing the window does.
+- **Opening files from Finder** (2): double-click, "Open With" and dropping on the Dock icon, at launch or while
+  running. Opened files are added to the Dock icon's recent documents.
+- **Shortcuts** (3): shown as ⌘ ⌥ ⇧. Mac-style defaults where the Windows keys clash with Mac habits:
+  - Find next/previous: ⌘G and ⇧⌘G.
+  - Go to page: ⌥⌘G.
+  - Back/forward: ⌘[ and ⌘] (⌥← and ⌥→ move by word while typing).
+  - Redo: ⇧⌘Z.
+
+  ⌘H, ⌘M, ⌘Q and the other macOS shortcuts can't be rebound.
+- **Zoom** (3): trackpad pinch and ⌘ + scroll wheel.
+- **Printing** (4): the native Mac print panel.
+- **Older Safari engine** (4): if exports need a newer Safari engine than the Mac has, a notice says to update macOS.
+- **Mac build in CI** (5): every push builds the Mac app as a `.dmg` next to the Windows installer.
+
+Not yet:
+
+- Mac in the release workflow and in-app updates (5). This comes after you've tested a CI build.
+- Quitting from the Dock icon, or logging out, closes PDForge without the "unsaved changes" prompt; Tauri doesn't
+  report those quits to the app. The next start offers to recover the unsaved documents, as after a crash.
+- Things only a real Mac can show: the checklist below.
+
+## How both apps stay in step
+
+There's one codebase. A feature is written once and runs on both:
+
+- Everything the Mac does differently is in `src/platform`, Rust `#[cfg]` blocks, `tauri.macos.conf.json` and
+  `capabilities/macos.json`. The Windows app's look and behaviour don't change.
+- Commands, shortcuts, the command palette and the Mac menu bar all come from one list (`src/ui/commands.ts`).
+- On every push, CI checks both:
+  - unit tests and end-to-end tests in Chromium (Windows' engine) and in WebKit (the Mac's);
+  - a Windows installer and a Mac app are built.
+- Unit tests check every shortcut and menu entry for Windows and Mac.
+- `CLAUDE.md` holds these rules for future work.
 
 ## Where things stand
 

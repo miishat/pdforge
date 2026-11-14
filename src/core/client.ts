@@ -14,7 +14,7 @@ export class CancelledError extends Error {
   }
 }
 
-type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void };
+type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; op?: string; at?: number };
 
 interface QueuedRender {
   req: RenderRequest;
@@ -185,7 +185,7 @@ export class EngineClient {
       share.check++; // A check already on its way was answered before this call: its answer no longer counts.
     }
     const result = new Promise<Result<K>>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
+      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, op, at: Date.now() });
       this.worker.postMessage({ id, op, args } as Envelope, transfer);
     });
     if (docId !== null && op === "close") this.stopSharing(docId);
@@ -211,6 +211,10 @@ export class EngineClient {
   /** Draws by the helpers are allowed for this document (for tests and diagnostics). */
   sharedForDrawing(docId: number): boolean {
     return this.shares.get(docId)?.stamp != null;
+  }
+
+  debugPending(): { op: string; ms: number }[] {
+    return [...this.pending.values()].map((p) => ({ op: p.op ?? "?", ms: Date.now() - (p.at ?? Date.now()) }));
   }
 
   private stopSharing(docId: number) {
@@ -343,4 +347,9 @@ export class EngineClient {
 let shared: EngineClient | null = null;
 export function engine(): EngineClient {
   return (shared ??= new EngineClient());
+}
+
+/** What the main engine is busy with: unanswered calls and how long they've waited (for test failure reports). */
+export function engineDebugState(): { op: string; ms: number }[] {
+  return shared?.debugPending() ?? [];
 }

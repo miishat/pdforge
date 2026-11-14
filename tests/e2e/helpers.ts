@@ -15,7 +15,10 @@ export const test = base.extend<{ browserMessages: void }>({
       });
       page.on("pageerror", (e) => lines.push(`uncaught: ${e.message}`));
       await use();
-      if (testInfo.status !== testInfo.expectedStatus && lines.length) console.log(`Browser messages in "${testInfo.title}":\n  ${lines.join("\n  ")}`);
+      if (testInfo.status === testInfo.expectedStatus) return;
+      const busy = await page.evaluate(() => (window as unknown as { __pdforgeEngine?: () => unknown }).__pdforgeEngine?.()).catch(() => null);
+      if (Array.isArray(busy) && busy.length) lines.push(`engine still busy with: ${JSON.stringify(busy)}`);
+      if (lines.length) console.log(`Browser messages in "${testInfo.title}":\n  ${lines.join("\n  ")}`);
     },
     { auto: true },
   ],
