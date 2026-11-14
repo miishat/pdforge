@@ -17,6 +17,7 @@
   Rust changes: `npm run check:rust` (checks Windows, macOS and Linux here). CI also runs every end-to-end test in
   WebKit (`npm run test:e2e:webkit`, the Mac app's engine) and builds both apps; WebKit can't be downloaded in the cloud
   container, so check that CI job instead (`gh run list`, `gh workflow run windows.yml --ref <branch>` for a branch).
+  WebKit retries a failed test once; look for "flaky" in that job's log too, since it found real timing bugs before.
 - In the cloud container, Playwright needs `PW_CHROMIUM=/opt/pw-browsers/chromium`. The Windows installer and the Mac
   app (`.dmg`) are built by CI only.
 - MuPDF gotchas: never call `needsPassword()` after authenticating (it drops the authentication); stream reads and

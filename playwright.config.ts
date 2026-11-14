@@ -8,6 +8,9 @@ export default defineConfig({
   testDir: "tests/e2e",
   outputDir: webkit ? "test-results/webkit" : "test-results",
   timeout: 30_000,
+  // WebKit on Linux (the CI stand-in for the Mac's engine) is less steady with drag and drop and timing than Safari
+  // itself, so a failure there gets one retry. Tests that needed it are still listed as "flaky" in the report.
+  retries: webkit ? 1 : 0,
   use: {
     baseURL: "http://localhost:1420",
     viewport: { width: 1280, height: 800 },
