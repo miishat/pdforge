@@ -1,5 +1,4 @@
-import { downloadName } from "./helpers";
-import { expect, test, type Page } from "@playwright/test";
+import { downloadName, expect, test, type Page } from "./helpers";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 

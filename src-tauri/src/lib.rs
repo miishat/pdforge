@@ -5,12 +5,46 @@ use std::sync::Mutex;
 use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{Emitter, Manager, State};
 
-/// Files Windows asked us to open at launch (double-click / "Open with"), handed to the UI once.
-struct LaunchFiles(Mutex<Vec<String>>);
+/// Files the system asked us to open at launch (double-click / "Open with"), handed to the UI once.
+struct LaunchFiles(Mutex<Launch>);
+
+#[derive(Default)]
+struct Launch {
+    files: Vec<String>,
+    /// The UI has taken the launch files; files that arrive later (macOS) go to it as `open-files` events.
+    taken: bool,
+}
 
 #[tauri::command]
 fn launch_files(state: State<'_, LaunchFiles>) -> Vec<String> {
-    state.0.lock().map(|mut f| std::mem::take(&mut *f)).unwrap_or_default()
+    state
+        .0
+        .lock()
+        .map(|mut l| {
+            l.taken = true;
+            std::mem::take(&mut l.files)
+        })
+        .unwrap_or_default()
+}
+
+/// Files that arrive while running: brings the window forward and hands them to the UI, or keeps them for
+/// `launch_files` if the UI hasn't asked yet.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn open_files(app: &tauri::AppHandle, files: Vec<String>) {
+    if files.is_empty() {
+        return;
+    }
+    if let Ok(mut l) = app.state::<LaunchFiles>().0.lock() {
+        if !l.taken {
+            l.files.extend(files);
+            return;
+        }
+    }
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+        let _ = w.emit("open-files", files);
+    }
 }
 
 /// The largest file PDForge opens. The PDF engine has 2 GB of working memory in all, and the file must fit in it
@@ -355,7 +389,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(LaunchFiles(Mutex::new(files_from_args(std::env::args(), None))))
+        .manage(LaunchFiles(Mutex::new(Launch { files: files_from_args(std::env::args(), None), taken: false })))
         .invoke_handler(tauri::generate_handler![
             launch_files,
             read_file,
@@ -376,8 +410,22 @@ pub fn run() {
             shell::default_pdf_app,
             shell::open_default_app_settings
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running PDForge");
+        .build(tauri::generate_context!())
+        .expect("error while running PDForge")
+        .run(|_app, _event| {
+            // macOS hands over files opened from Finder (double-click, "Open With", dropped on the Dock icon) as
+            // an event, at launch and while running, instead of as command-line arguments.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
+                let files = urls
+                    .iter()
+                    .filter_map(|u| u.to_file_path().ok())
+                    .filter(|p| p.is_file())
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect();
+                open_files(_app, files);
+            }
+        });
 }
 
 #[cfg(test)]

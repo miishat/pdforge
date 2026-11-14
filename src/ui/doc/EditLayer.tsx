@@ -148,11 +148,11 @@ export const EditLayer = memo(function EditLayer(p: Props) {
               title={l.editable ? `${l.font}, ${l.size} pt. Click to edit.` : l.reason ?? undefined}
               role="button"
               aria-label={`Edit text: ${l.text}`}
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                if (l.editable) setEditing(l.index);
-              }}
+              onPointerDown={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.preventDefault()}
+              // On click, not pointer-down: swapping this element for the editor mid-press lets Safari's engine send
+              // the mouse-down to the removed element, whose default action takes the focus from the editor.
+              onClick={() => l.editable && setEditing(l.index)}
             />
           ),
         )}

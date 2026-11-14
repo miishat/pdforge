@@ -1,5 +1,6 @@
-//! Windows shell integration: Snap Layouts on the custom maximize button, recent files in the taskbar jump list,
-//! and making PDForge the default PDF app. On other systems these do nothing.
+//! Shell integration. Windows: Snap Layouts on the custom maximize button, recent files in the taskbar jump list,
+//! and making PDForge the default PDF app. macOS: recent files in the Dock menu and File > Open Recent. Elsewhere
+//! these do nothing.
 
 /// Where the "Make default" registration lives (per user, no administrator rights needed).
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -184,11 +185,33 @@ pub fn show_snap_layouts(window: tauri::WebviewWindow) -> bool {
 }
 
 #[tauri::command]
-pub fn add_recent_document(path: String) {
+pub fn add_recent_document(app: tauri::AppHandle, path: String) {
     #[cfg(windows)]
-    imp::add_recent_document(&path);
-    #[cfg(not(windows))]
-    let _ = path;
+    {
+        let _ = app;
+        imp::add_recent_document(&path);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // AppKit wants the main thread.
+        let _ = app.run_on_main_thread(move || mac::add_recent_document(&path));
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let _ = (app, path);
+}
+
+#[cfg(target_os = "macos")]
+mod mac {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSDocumentController;
+    use objc2_foundation::{NSString, NSURL};
+
+    /// Lists the file under the Dock icon's recent documents.
+    pub fn add_recent_document(path: &str) {
+        let Some(mtm) = MainThreadMarker::new() else { return };
+        let url = NSURL::fileURLWithPath(&NSString::from_str(path));
+        NSDocumentController::sharedDocumentController(mtm).noteNewRecentDocumentURL(&url);
+    }
 }
 
 #[tauri::command]
