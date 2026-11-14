@@ -207,3 +207,17 @@ close-window prompt (all are desktop-only paths; the browser test build download
   the Release workflow test, build, sign, tag and publish the installer with `latest.json` (or run it from the Actions tab)
 - 🟡 The installer isn't code-signed (no Authenticode certificate), so browsers and SmartScreen warn on the first
   download. Updates installed by PDForge itself don't show that warning
+
+## macOS (Apple silicon, in progress: docs/MAC_PLAN.md)
+
+- ✅ One codebase for Windows and Mac. Every end-to-end test also runs in WebKit (the Mac app's engine), and CI builds
+  both apps on every push
+- ✅ Native Mac window buttons and title bar; a menu bar built from the command list (new commands appear in it)
+- ✅ Shortcuts shown as ⌘ ⌥ ⇧, with Mac-style defaults where Windows keys clash (⌘G find next, ⌥⌘G go to page,
+  ⌘[ / ⌘] back and forward, ⇧⌘Z redo); macOS's own shortcuts can't be rebound
+- ✅ Trackpad pinch and ⌘ + scroll to zoom; ⌘Q asks about unsaved changes
+- ✅ Files opened from Finder (double-click, Open With, the Dock icon) open in PDForge; they're listed in the Dock
+  icon's recent documents
+- ✅ Printing through the Mac print panel
+- 🟡 Not yet tested on a real Mac; not yet in releases or in-app updates
+- 🟡 Not notarized: macOS asks once, the first time (System Settings → Privacy & Security → Open Anyway)

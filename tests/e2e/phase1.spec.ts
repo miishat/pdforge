@@ -238,7 +238,10 @@ test.describe("view options", () => {
     expect(z).toBeGreaterThan(250);
   });
 
-  test("presentation mode shows one page and Esc leaves", async ({ page }) => {
+  test("presentation mode shows one page and Esc leaves", async ({ page, browserName }) => {
+    // In WebKit's test browser, page full screen keeps Esc for itself. The apps (Windows and Mac) use the window's
+    // own full screen instead, where Esc reaches the page as in Chromium.
+    test.skip(browserName === "webkit", "WebKit's page full screen takes Esc; the apps use window full screen");
     await open(page, "sample.pdf");
     await page.keyboard.press("Control+l");
     await expect(page.getByRole("dialog", { name: "Presentation" })).toBeVisible();
