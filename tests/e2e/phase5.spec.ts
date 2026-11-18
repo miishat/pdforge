@@ -102,6 +102,21 @@ test("extract a table to Excel", async ({ page }) => {
   const dialog = page.getByRole("dialog", { name: "Extract tables" });
   await expect(dialog.locator(".table-preview th").first()).toHaveText("Region");
   await expect(dialog.locator(".table-preview tr").nth(3)).toContainText("West coast");
+  // Select none, then pick tables one by one; Select all brings them all back.
+  const exportButton = dialog.getByRole("button", { name: "Export…" });
+  const boxes = dialog.getByRole("checkbox", { name: /^Include / });
+  const count = await boxes.count();
+  await dialog.getByRole("button", { name: "Select none" }).click();
+  await expect(dialog.getByText(`0 of ${count} selected`)).toBeVisible();
+  await expect(exportButton).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Select none" })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Select all" }).click();
+  await expect(dialog.getByText(`${count} of ${count} selected`)).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Select all" })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Select none" }).click();
+  await boxes.first().check();
+  await expect(dialog.getByText(`1 of ${count} selected`)).toBeVisible();
+  await expect(exportButton).toBeEnabled();
   const [download] = await Promise.all([page.waitForEvent("download"), dialog.getByRole("button", { name: "Export…" }).click()]);
   expect(downloadName(download)).toBe("table tables.xlsx");
   expect(readFileSync(await download.path()).subarray(0, 2).toString()).toBe("PK");

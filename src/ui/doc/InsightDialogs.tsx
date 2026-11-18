@@ -68,17 +68,24 @@ export function TablesDialog({ info, name, onClose, onStatus }: { info: DocInfo;
       {tables && !tables.length && <p>No tables found. PDForge looks for text arranged in rows and aligned columns; tables that are pictures need text recognition first.</p>}
       {tables && tables.length > 0 && (
         <div className="tables-layout">
-          <ul className="tables-list" aria-label="Tables found">
-            {tables.map((tb, i) => (
-              <li key={i} className={preview === i ? "tables-list__item tables-list__item--on" : "tables-list__item"}>
-                <input type="checkbox" aria-label={`Include ${label(tb, i)}`} checked={chosen.has(i)} onChange={(e) => { const n = new Set(chosen); if (e.target.checked) n.add(i); else n.delete(i); setChosen(n); }} />
-                <button className="tables-list__name" onClick={() => setPreview(i)}>
-                  {label(tb, i)}
-                  <span className="muted"> · {tb.rows.length} × {tb.rows[0]?.length ?? 0}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <div>
+            <div className="tables-select">
+              <button className="link-button" disabled={chosen.size === tables.length} onClick={() => setChosen(new Set(tables.map((_, i) => i)))}>Select all</button>
+              <button className="link-button" disabled={!chosen.size} onClick={() => setChosen(new Set())}>Select none</button>
+              <span className="muted tables-select__count" aria-live="polite">{chosen.size} of {tables.length} selected</span>
+            </div>
+            <ul className="tables-list" aria-label="Tables found">
+              {tables.map((tb, i) => (
+                <li key={i} className={preview === i ? "tables-list__item tables-list__item--on" : "tables-list__item"}>
+                  <input type="checkbox" aria-label={`Include ${label(tb, i)}`} checked={chosen.has(i)} onChange={(e) => { const n = new Set(chosen); if (e.target.checked) n.add(i); else n.delete(i); setChosen(n); }} />
+                  <button className="tables-list__name" onClick={() => setPreview(i)}>
+                    {label(tb, i)}
+                    <span className="muted"> · {tb.rows.length} × {tb.rows[0]?.length ?? 0}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
           {t && (
             <div className="table-preview" tabIndex={0} aria-label={`Preview of ${label(t, preview)}`}>
               <table>

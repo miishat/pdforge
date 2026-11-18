@@ -3143,6 +3143,22 @@ textarea.form-field {
   gap: var(--space-3);
   min-height: 260px;
 }
+.tables-select {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  padding: 0 var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+}
+.tables-select__count {
+  flex-basis: 100%;
+}
+.tables-select .link-button:disabled {
+  color: var(--text-muted);
+  text-decoration: none;
+  cursor: default;
+}
 .tables-list {
   margin: 0;
   padding: 0;
