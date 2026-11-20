@@ -219,5 +219,6 @@ close-window prompt (all are desktop-only paths; the browser test build download
 - ✅ Files opened from Finder (double-click, Open With, the Dock icon) open in PDForge; they're listed in the Dock
   icon's recent documents
 - ✅ Printing through the Mac print panel
-- 🟡 Not yet tested on a real Mac; not yet in releases or in-app updates
+- ✅ Releases include a Mac download (.dmg) from 0.2.5 on, and the Mac app updates itself like the Windows one
+- 🟡 Not yet tested on a real Mac
 - 🟡 Not notarized: macOS asks once, the first time (System Settings → Privacy & Security → Open Anyway)

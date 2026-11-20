@@ -1,9 +1,12 @@
 name: Release
 
 # Publishes a release whenever main gets a new version number (npm run release), or when started by hand
-# from the Actions tab. Builds the Windows installer, signs it for the in-app updater, and publishes a GitHub
-# Release (tag vX.Y.Z) with the installer and latest.json, which installed copies of PDForge read to find
-# new versions. A version that already has a published release is skipped.
+# from the Actions tab. Builds the Windows installer and the Mac app (Apple silicon), signs both for the in-app
+# updater, and publishes a GitHub Release (tag vX.Y.Z) with both downloads and latest.json, which installed
+# copies of PDForge read to find new versions (each system finds its own entry in it).
+#
+# A version that's already published only gets what it's missing: e.g. running this again adds a Mac download
+# to a release that has only the Windows installer. A version with both is skipped.
 on:
   push:
     branches: [main]
@@ -19,49 +22,51 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build and publish
-    runs-on: windows-latest
+  plan:
+    name: Work out what to build
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      windows: ${{ steps.plan.outputs.windows }}
+      mac: ${{ steps.plan.outputs.mac }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Work out the version, and whether it's already released
-        id: version
+      - id: plan
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tag="v$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          tag="v$version"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "$tag" ]; then
             echo "::error::The tag is $GITHUB_REF_NAME but the app version is $tag. Use npm run release to set the version."
             exit 1
           fi
-          if [ "$(gh release view "$tag" --json isDraft -q '.isDraft' 2>/dev/null)" = "false" ]; then
-            echo "$tag is already released; nothing to do."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
+          # The files the release already has (none if there's no release yet).
+          assets=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" -q '.assets[].name' 2>/dev/null || true)
+          if ! grep -qx "PDForge_${version}_x64-setup.exe" <<<"$assets"; then echo "windows=true" >> "$GITHUB_OUTPUT"; fi
+          if ! grep -qx "PDForge_${version}_aarch64.dmg" <<<"$assets"; then echo "mac=true" >> "$GITHUB_OUTPUT"; fi
+          echo "Release $tag has: ${assets:-nothing yet}"
 
-      - if: steps.version.outputs.skip != 'true'
-        uses: actions/setup-node@v4
+  windows:
+    name: Windows installer
+    needs: plan
+    if: needs.plan.outputs.windows == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - if: steps.version.outputs.skip != 'true'
-        uses: dtolnay/rust-toolchain@stable
-      - if: steps.version.outputs.skip != 'true'
-        uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - if: steps.version.outputs.skip != 'true'
-        run: npm ci
-      - if: steps.version.outputs.skip != 'true'
-        run: npm test
-
+      - run: npm ci
+      - run: npm test
       - name: Check the update signing key is set
-        if: steps.version.outputs.skip != 'true'
         shell: bash
         env:
           KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -70,12 +75,79 @@ jobs:
             echo "::error::Add the TAURI_SIGNING_PRIVATE_KEY repository secret (Settings > Secrets and variables > Actions)."
             exit 1
           fi
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ needs.plan.outputs.tag }}
+          releaseName: PDForge ${{ needs.plan.outputs.tag }}
+          releaseCommitish: ${{ github.sha }}
+          releaseBody: See the notes below.
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
 
-      - name: Write release notes
-        if: steps.version.outputs.skip != 'true'
+  # After Windows, not alongside it: each build adds its entry to latest.json, and two at once could lose one.
+  macos:
+    name: Mac app (Apple silicon)
+    needs: [plan, windows]
+    if: always() && needs.plan.outputs.mac == 'true' && (needs.windows.result == 'success' || needs.windows.result == 'skipped')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npm test
+      - name: Check the update signing key is set
         shell: bash
         env:
-          TAG: ${{ steps.version.outputs.tag }}
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::Add the TAURI_SIGNING_PRIVATE_KEY repository secret (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+      # Not notarized (see docs/MAC_PLAN.md): signed ad hoc, so macOS offers "Open Anyway" the first time.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ needs.plan.outputs.tag }}
+          releaseName: PDForge ${{ needs.plan.outputs.tag }}
+          releaseCommitish: ${{ github.sha }}
+          releaseBody: See the notes below.
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+
+  # Publish only once everything is uploaded, so the updater never sees a half-finished release.
+  publish:
+    name: Publish the release with its notes
+    needs: [plan, windows, macos]
+    if: >-
+      always() && (needs.plan.outputs.windows == 'true' || needs.plan.outputs.mac == 'true') &&
+      (needs.windows.result == 'success' || needs.windows.result == 'skipped') &&
+      (needs.macos.result == 'success' || needs.macos.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Write release notes
+        shell: bash
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
         run: |
           # Empty matches and an early stop by head aren't errors here.
           set +o pipefail
@@ -87,30 +159,16 @@ jobs:
             echo
             git log --no-merges --format='- %s' "$range" | grep -v '^- Release [0-9]' | head -60 || true
             echo
-            echo "Installed copies of PDForge (0.2.0 and later) offer this update on their own. To install by hand, download the setup .exe below."
+            echo "Installed copies of PDForge (0.2.0 and later on Windows) offer this update on their own. To install by hand:"
+            echo
+            echo "- Windows: download the setup .exe below."
+            echo "- Mac (Apple silicon): download the .dmg below and drag PDForge into Applications. The first time, macOS"
+            echo "  won't open it: go to System Settings > Privacy & Security and click Open Anyway (once only)."
           } > release-notes.md
           cat release-notes.md
-
-      - if: steps.version.outputs.skip != 'true'
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          tagName: ${{ steps.version.outputs.tag }}
-          releaseName: PDForge ${{ steps.version.outputs.tag }}
-          releaseCommitish: ${{ github.sha }}
-          releaseBody: See the notes below.
-          releaseDraft: true
-          prerelease: false
-          includeUpdaterJson: true
-
-      # Publish only once everything is uploaded, so the updater never sees a half-finished release.
-      - name: Publish the release with its notes
-        if: steps.version.outputs.skip != 'true'
+      - name: Publish
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.version.outputs.tag }}
+          TAG: ${{ needs.plan.outputs.tag }}
         run: gh release edit "$TAG" --notes-file release-notes.md --draft=false --latest

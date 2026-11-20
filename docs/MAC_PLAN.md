@@ -35,10 +35,12 @@ Done:
 - **Printing** (4): the native Mac print panel.
 - **Older Safari engine** (4): if exports need a newer Safari engine than the Mac has, a notice says to update macOS.
 - **Mac build in CI** (5): every push builds the Mac app as a `.dmg` next to the Windows installer.
+- **Releases and updates** (5): every release has a Mac download (`.dmg`) next to the Windows installer, and
+  `latest.json` has a Mac entry, so the Mac app updates itself like the Windows one. The Mac build runs after the
+  Windows one, so the two never write `latest.json` at once. 0.2.5 was the first release with a Mac download.
 
 Not yet:
 
-- Mac in the release workflow and in-app updates (5). This comes after you've tested a CI build.
 - Quitting from the Dock icon, or logging out, closes PDForge without the "unsaved changes" prompt; Tauri doesn't
   report those quits to the app. The next start offers to recover the unsaved documents, as after a crash.
 - Things only a real Mac can show: the checklist below.
